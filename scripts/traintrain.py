@@ -1,21 +1,26 @@
 from cProfile import label
 import os
-from functools import wraps
 import pandas as pd
 import matplotlib.pyplot as plt
 import gradio as gr
 from PIL import Image, ImageChops
 import random
 import numpy as np
-from modules import scripts, script_callbacks, sd_models, sd_vae
-from modules.shared import opts
-from modules.ui import create_output_panel, create_refresh_button
-from trainer import train, trainer, gen
+from . import comfyui
+from .comfyui import ToolButton, create_refresh_button
+#from modules import scripts, script_callbacks, sd_models, sd_vae
+#from modules.shared import opts
+#from modules.ui import create_output_panel, create_refresh_button
+#from ..trainer import train, trainer, gen
 from packaging import version
 
-jsonspath = trainer.jsonspath
-logspath = trainer.logspath
-presetspath = trainer.presetspath
+#jsonspath = trainer.jsonspath
+#logspath = trainer.logspath
+#presetspath = trainer.presetspath
+path_root = os.path.dirname(os.path.abspath(__file__))
+jsonspath = os.path.normpath(os.path.join(path_root,"../jsons"))
+logspath = os.path.normpath(os.path.join(path_root,"../logs"))
+presetspath = os.path.normpath(os.path.join(path_root,"../presets"))
 
 MODES = ["LoRA", "iLECO", "Difference"]
 
@@ -125,7 +130,8 @@ o_column2 = [train_textencoder_learning_rate,train_seed,train_lr_step_rules, tra
 o_column3 = [train_model_precision, train_lora_precision,save_precision,diff_load_1st_pass, diff_save_1st_pass,diff_1st_pass_only,
                     logging_save_csv,logging_verbose,save_overwrite, save_as_json,model_v_pred]
 
-trainer.all_configs = r_column1 + r_column2 + r_column3 + row1 + o_column1 + o_column2 + o_column3 + [use_2nd_pass_settings]
+# trainer.all_configs = r_column1 + r_column2 + r_column3 + row1 + o_column1 + o_column2 + o_column3 + [use_2nd_pass_settings]
+all_configs = r_column1 + r_column2 + r_column3 + row1 + o_column1 + o_column2 + o_column3 + [use_2nd_pass_settings]
 
 def makeui(sets, pas = 0):
     output = []
@@ -159,28 +165,6 @@ prompts = None
 imagegal_orig = None
 imagegal_targ = None
 
-IS_GRADIO_4 = version.parse(gr.__version__) >= version.parse("4.0.0")
-
-class FormComponent:
-    webui_do_not_create_gradio_pyi_thank_you = True
-
-    def get_expected_parent(self):
-        return gr.components.Form
-
-class ToolButton(gr.Button, FormComponent):
-    """Small button with single emoji as text, fits inside gradio forms"""
-
-    @wraps(gr.Button.__init__)
-    def __init__(self, value="", *args, elem_classes=None, **kwargs):
-        elem_classes = elem_classes or []
-        super().__init__(*args, elem_classes=["tool", *elem_classes], value=value, **kwargs)
-
-    def get_block_name(self):
-        return "button"
-
-if IS_GRADIO_4:
-    ToolButton.__module__ = "modules.ui_components"
-
 def on_ui_tabs():
     global imagegal_orig, imagegal_targ, prompts, result
     global button_o_gen, button_t_gen, button_b_gen
@@ -190,7 +174,7 @@ def on_ui_tabs():
         if name is None:
             return json_files
         else:
-            return trainer.import_json(name, preset = True)
+            return json_files # trainer.import_json(name, preset = True)
 
     folder_symbol = '\U0001f4c2'   
     load_symbol = '\u2199\ufe0f'   # ↙
@@ -223,12 +207,12 @@ def on_ui_tabs():
                     mode = gr.Radio(label="Mode", choices= MODES, value = "LoRA")
                 with gr.Column():
                     with gr.Row(equal_height=True):
-                        model = gr.Dropdown(sd_models.checkpoint_tiles(),elem_id="model_converter_model_name",label="Model",interactive=True)
-                        create_refresh_button(model, sd_models.list_models,lambda: {"choices": sd_models.checkpoint_tiles()},"refresh_checkpoint_Z")
+                        model = gr.Dropdown(comfyui.list_checkpoints(),elem_id="model_converter_model_name",label="Model",interactive=True)
+                        create_refresh_button(model, lambda: {}, lambda: {"choices": comfyui.list_checkpoints()}, "refresh_checkpoint_Z")
                 with gr.Column():
                     with gr.Row(equal_height=True):
-                        vae = gr.Dropdown(choices=["None"] + list(sd_vae.vae_dict), value="None", label="VAE", elem_id="modelmerger_bake_in_vae")
-                        create_refresh_button(vae, sd_vae.refresh_vae_list, lambda: {"choices": ["None"] + list(sd_vae.vae_dict)}, "modelmerger_refresh_bake_in_vae")
+                        vae = gr.Dropdown(choices=["None"] + comfyui.list_vaes(), value="None", label="VAE", elem_id="modelmerger_bake_in_vae")
+                        create_refresh_button(vae, lambda: {}, lambda: {"choices": ["None"] + comfyui.list_vaes()}, "modelmerger_refresh_bake_in_vae")
 
             dummy = gr.Checkbox(visible=False, value = False)
 
@@ -294,11 +278,13 @@ def on_ui_tabs():
                     button_b_gen = gr.Button(value="Generate All",elem_classes=["compact_button"],variant='primary')
                 with gr.Row():
                     with gr.Column():
-                        o_g =  create_output_panel("txt2img", opts.outdir_txt2img_samples)
-                        imagegal_orig = [x for x in o_g] if isinstance(o_g, tuple) else [o_g.gallery, o_g.generation_info, o_g.infotext, o_g.html_log]
+                        pass
+                        # o_g =  create_output_panel("txt2img", opts.outdir_txt2img_samples)
+                        # imagegal_orig = [x for x in o_g] if isinstance(o_g, tuple) else [o_g.gallery, o_g.generation_info, o_g.infotext, o_g.html_log]
                     with gr.Column():
-                        t_g =  create_output_panel("txt2img", opts.outdir_txt2img_samples)
-                        imagegal_targ = [x for x in t_g] if isinstance(t_g, tuple) else [t_g.gallery, t_g.generation_info, t_g.infotext, t_g.html_log]
+                        pass
+                        # t_g =  create_output_panel("txt2img", opts.outdir_txt2img_samples)
+                        # imagegal_targ = [x for x in t_g] if isinstance(t_g, tuple) else [t_g.gallery, t_g.generation_info, t_g.infotext, t_g.html_log]
 
             with gr.Group(visible=False) as g_diff:
                 with gr.Row():
@@ -313,7 +299,8 @@ def on_ui_tabs():
                 delete_queue= gr.Button(value="Delete Queue",elem_classes=["compact_button"],variant='primary')
                 delete_name= gr.Textbox(label="Name of Queue to delete")
             with gr.Row():
-                queue_list = gr.DataFrame(headers=["Name", "Mode", "Model", "VAE"] + [x[0] for x in trainer.all_configs] * 2 + ["Original prompt", "Target prompt"] )
+                # queue_list = gr.DataFrame(headers=["Name", "Mode", "Model", "VAE"] + [x[0] for x in trainer.all_configs] * 2 + ["Original prompt", "Target prompt"] )
+                queue_list = gr.DataFrame(headers=["Name", "Mode", "Model", "VAE"] + [x[0] for x in all_configs] * 2 + ["Original prompt", "Target prompt"] )
 
         with gr.Tab("Plot"):
             with gr.Row():
@@ -356,26 +343,27 @@ def on_ui_tabs():
         in_images = [orig_image, targ_image]
 
         def savepreset_f(*args):
-            train.train(*args)
+        #     train.train(*args)
             return gr.update(choices=load_preset(None))
 
         angle_bg.click(change_angle_bg,[dtrue, image_dir, save_dir, input_image,output_name, num_of_images ,change_angle,max_tilting_angle, change_scale, min_scale, fix_side], [image_result])
         angle_bg_i.click(change_angle_bg,[dfalse, image_dir, save_dir, input_image,output_name, num_of_images ,change_angle,max_tilting_angle, change_scale, min_scale, fix_side], [image_result])
 
-        start.click(train.train, [dfalse, mode, model, vae, *train_settings_1, *train_settings_2, *prompts, *in_images],[result])
-        queue.click(train.queue, [dfalse, mode, model, vae, *train_settings_1, *train_settings_2, *prompts, *in_images],[result])
-        savepreset.click(savepreset_f, [dtrue, mode, model, vae, *train_settings_1, *train_settings_2, *prompts, *in_images], [presets])
+        # start.click(train.train, [dfalse, mode, model, vae, *train_settings_1, *train_settings_2, *prompts, *in_images],[result])
+        # queue.click(train.queue, [dfalse, mode, model, vae, *train_settings_1, *train_settings_2, *prompts, *in_images],[result])
+        # savepreset.click(savepreset_f, [dtrue, mode, model, vae, *train_settings_1, *train_settings_2, *prompts, *in_images], [presets])
         refleshpreset.click(lambda : gr.update(choices=load_preset(None)), outputs = [presets])
 
-        reload_queue.click(train.get_del_queue_list, outputs= queue_list)
-        delete_queue.click(train.get_del_queue_list, inputs = [delete_name], outputs= queue_list)
+        # reload_queue.click(train.get_del_queue_list, outputs= queue_list)
+        # delete_queue.click(train.get_del_queue_list, inputs = [delete_name], outputs= queue_list)
 
-        stop.click(train.stop_time,[dfalse],[result])
-        stop_save.click(train.stop_time,[dtrue],[result])
+        # stop.click(train.stop_time,[dfalse],[result])
+        # stop_save.click(train.stop_time,[dtrue],[result])
 
         def change_the_mode(mode):
             mode = MODES.index(mode)
-            out = [x[5][mode] for x in trainer.all_configs]
+            #out = [x[5][mode] for x in trainer.all_configs]
+            out = [x[5][mode] for x in all_configs]
             if mode == 1: #LECO
                 out.extend([False, True, False])
             elif mode > 1: #Difference
@@ -391,7 +379,7 @@ def on_ui_tabs():
         def openfolder_f():
             os.startfile(jsonspath)
 
-        loadjson.click(trainer.import_json,[sets_file], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
+        # loadjson.click(trainer.import_json,[sets_file], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
         loadpreset.click(load_preset,[presets], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
         mode.change(change_the_mode,[mode],[*train_settings_1, diff_2nd, g_leco ,g_diff])
         openfolder.click(openfolder_f)
@@ -553,109 +541,109 @@ def getjsonlist():
     json_files = [f.replace(".json", "") for f in json_files]
     return json_files
 
-class GenParamGetter(scripts.Script):
-    events_assigned = False
-    def title(self):
-        return "TrainTrain Generation Parameter Getter"
+# class GenParamGetter(scripts.Script):
+#     events_assigned = False
+#     def title(self):
+#         return "TrainTrain Generation Parameter Getter"
     
-    def show(self, is_img2img):
-        return scripts.AlwaysVisible
+#     def show(self, is_img2img):
+#         return scripts.AlwaysVisible
 
-    def get_wanted_params(params,wanted):
-        output = []
-        for target in wanted:
-            if target is None:
-                output.append(params[0])
-                continue
-            for param in params:
-                if hasattr(param,"label"):
-                    if param.label == target:
-                        output.append(param)
-        return output
+#     def get_wanted_params(params,wanted):
+#         output = []
+#         for target in wanted:
+#             if target is None:
+#                 output.append(params[0])
+#                 continue
+#             for param in params:
+#                 if hasattr(param,"label"):
+#                     if param.label == target:
+#                         output.append(param)
+#         return output
 
-    def after_component(self, component: gr.components.Component, **_kwargs):
-        """Find generate button"""
-        if component.elem_id == "txt2img_generate":
-            GenParamGetter.txt2img_gen_button = component
-        elif  component.elem_id == "img2img_generate":
-            GenParamGetter.img2img_gen_button = component
+#     def after_component(self, component: gr.components.Component, **_kwargs):
+#         """Find generate button"""
+#         if component.elem_id == "txt2img_generate":
+#             GenParamGetter.txt2img_gen_button = component
+#         elif  component.elem_id == "img2img_generate":
+#             GenParamGetter.img2img_gen_button = component
 
-    def get_components_by_ids(root: gr.Blocks, ids: list[int]):
-        components: list[gr.Blocks] = []
+#     def get_components_by_ids(root: gr.Blocks, ids: list[int]):
+#         components: list[gr.Blocks] = []
 
-        if root._id in ids:
-            components.append(root)
-            ids = [_id for _id in ids if _id != root._id]
+#         if root._id in ids:
+#             components.append(root)
+#             ids = [_id for _id in ids if _id != root._id]
         
-        if hasattr(root,"children"):
-            for block in root.children:
-                components.extend(GenParamGetter.get_components_by_ids(block, ids))
-        return components
+#         if hasattr(root,"children"):
+#             for block in root.children:
+#                 components.extend(GenParamGetter.get_components_by_ids(block, ids))
+#         return components
     
-    def compare_components_with_ids(components: list[gr.Blocks], ids: list[int]):
-        return len(components) == len(ids) and all(component._id == _id for component, _id in zip(components, ids))
+#     def compare_components_with_ids(components: list[gr.Blocks], ids: list[int]):
+#         return len(components) == len(ids) and all(component._id == _id for component, _id in zip(components, ids))
 
-    def get_params_components(demo: gr.Blocks, app):
-        global paramsnames, txt2img_params, img2img_params
-        for _id, _is_txt2img in zip([GenParamGetter.txt2img_gen_button._id, GenParamGetter.img2img_gen_button._id], [True, False]):
-            if hasattr(demo,"dependencies"):
-                dependencies: list[dict] = [x for x in demo.dependencies if x["trigger"] == "click" and _id in x["targets"]]
-                g4 = False
-            else:
-                dependencies: list[dict] = [x for x in demo.config["dependencies"] if x["targets"][0][1] == "click" and _id in x["targets"][0]]
-                g4 = True
+#     def get_params_components(demo: gr.Blocks, app):
+#         global paramsnames, txt2img_params, img2img_params
+#         for _id, _is_txt2img in zip([GenParamGetter.txt2img_gen_button._id, GenParamGetter.img2img_gen_button._id], [True, False]):
+#             if hasattr(demo,"dependencies"):
+#                 dependencies: list[dict] = [x for x in demo.dependencies if x["trigger"] == "click" and _id in x["targets"]]
+#                 g4 = False
+#             else:
+#                 dependencies: list[dict] = [x for x in demo.config["dependencies"] if x["targets"][0][1] == "click" and _id in x["targets"][0]]
+#                 g4 = True
             
-            dependency: dict = None
+#             dependency: dict = None
 
-            for d in dependencies:
-                if len(d["outputs"]) == 4:
-                    dependency = d
+#             for d in dependencies:
+#                 if len(d["outputs"]) == 4:
+#                     dependency = d
             
-            if g4:
-                params = [demo.blocks[x] for x in dependency['inputs']]
-                if _is_txt2img:
-                    paramsnames = [x.label if hasattr(x,"label") else "None" for x in params]
+#             if g4:
+#                 params = [demo.blocks[x] for x in dependency['inputs']]
+#                 if _is_txt2img:
+#                     paramsnames = [x.label if hasattr(x,"label") else "None" for x in params]
 
-                if _is_txt2img:
-                    txt2img_params = params
-                else:
-                    img2img_params = params
-            else:
-                params = [params for params in demo.fns if GenParamGetter.compare_components_with_ids(params.inputs, dependency["inputs"])]
+#                 if _is_txt2img:
+#                     txt2img_params = params
+#                 else:
+#                     img2img_params = params
+#             else:
+#                 params = [params for params in demo.fns if GenParamGetter.compare_components_with_ids(params.inputs, dependency["inputs"])]
 
-                if _is_txt2img:
-                    paramsnames = [x.label if hasattr(x,"label") else "None" for x in params[0].inputs]
+#                 if _is_txt2img:
+#                     paramsnames = [x.label if hasattr(x,"label") else "None" for x in params[0].inputs]
 
-                if _is_txt2img:
-                    txt2img_params = params[0].inputs 
-                else:
-                    img2img_params = params[0].inputs
+#                 if _is_txt2img:
+#                     txt2img_params = params[0].inputs 
+#                 else:
+#                     img2img_params = params[0].inputs
 
-            # from pprint import pprint
-            # pprint(paramsnames)
+#             # from pprint import pprint
+#             # pprint(paramsnames)
 
-        if not GenParamGetter.events_assigned:
-            with demo:
-                button_o_gen.click(
-                    fn=gen.setup_gen_p,
-                    inputs=[gr.Checkbox(value=False, visible=False), prompts[0], prompts[2], *txt2img_params],
-                    outputs=imagegal_orig,
-                )
+#         if not GenParamGetter.events_assigned:
+#             with demo:
+#                 button_o_gen.click(
+#                     fn=gen.setup_gen_p,
+#                     inputs=[gr.Checkbox(value=False, visible=False), prompts[0], prompts[2], *txt2img_params],
+#                     outputs=imagegal_orig,
+#                 )
 
-                button_t_gen.click(
-                    fn=gen.setup_gen_p,
-                    inputs=[gr.Checkbox(value=False, visible=False), prompts[1], prompts[2], *txt2img_params],
-                    outputs=imagegal_targ,
-                )
+#                 button_t_gen.click(
+#                     fn=gen.setup_gen_p,
+#                     inputs=[gr.Checkbox(value=False, visible=False), prompts[1], prompts[2], *txt2img_params],
+#                     outputs=imagegal_targ,
+#                 )
 
-                button_b_gen.click(
-                    fn=gen.gen_both,
-                    inputs=[*prompts, *txt2img_params],
-                    outputs=imagegal_orig + imagegal_targ
-                )
+#                 button_b_gen.click(
+#                     fn=gen.gen_both,
+#                     inputs=[*prompts, *txt2img_params],
+#                     outputs=imagegal_orig + imagegal_targ
+#                 )
 
-            GenParamGetter.events_assigned = True
+#             GenParamGetter.events_assigned = True
 
-if __package__ == "traintrain":
-    script_callbacks.on_ui_tabs(on_ui_tabs)
-    script_callbacks.on_app_started(GenParamGetter.get_params_components)
+#if __package__ == "traintrain":
+#    script_callbacks.on_ui_tabs(on_ui_tabs)
+#    script_callbacks.on_app_started(GenParamGetter.get_params_components)

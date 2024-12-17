@@ -1,15 +1,15 @@
-import asyncio
-import threading
-
 import gradio
+import gradio.blocks
 from gradio.routes import App
 from aiohttp import web
 from server import PromptServer
 
+from . import traintrain
+
 class GradioServer:
     _instance = None
 
-    INTERFACE: gradio.Interface = None
+    BLOCKS: gradio.Blocks = None
     APP: App = None
     LOCAL_URL: str = None
     SHARE_URL: str = None
@@ -20,17 +20,14 @@ class GradioServer:
         return cls._instance
 
     def launch(this) -> None:
-        def ret(input: str) -> str:
-            return f"Hello, {input}!"
-
-        if not this.INTERFACE:
-            this.INTERFACE = gradio.Interface(fn=ret, inputs="textbox", outputs="textbox")
-            this.APP, this.LOCAL_URL, this.SHARE_URL = this.INTERFACE.launch(prevent_thread_lock=True)
+        if not this.BLOCKS:
+            this.BLOCKS, _, _ = traintrain.on_ui_tabs()[0]
+            this.APP, this.LOCAL_URL, this.SHARE_URL = this.BLOCKS.launch(prevent_thread_lock=True)
 
     def close(this) -> None:
-        if this.INTERFACE:
-            this.INTERFACE.close()
-            this.INTERFACE = None
+        if this.BLOCKS:
+            this.BLOCKS.close()
+            this.BLOCKS = None
 
 @PromptServer.instance.routes.get("/traintrain/start_server")
 def start_server(request: web.Request) -> web.Response:
