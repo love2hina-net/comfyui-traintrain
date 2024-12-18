@@ -1,3 +1,4 @@
+import os.path as path
 from functools import wraps
 import gradio as gr
 
@@ -5,11 +6,19 @@ import folder_paths
 
 refresh_symbol = '\U0001f504'  # 🔄
 
+BASEDIR = path.normpath(path.join(path.dirname(path.abspath(__file__)), ".."))
+
+def basedir() -> str:
+    return BASEDIR
+
 def list_checkpoints() -> list[str]:
     return folder_paths.get_filename_list("checkpoints")
 
 def list_vaes() -> list[str]:
     return folder_paths.get_filename_list("vae")
+
+def get_lora_dir() -> str:
+    return folder_paths.get_folder_paths("loras")[0]
 
 class FormComponent:
     webui_do_not_create_gradio_pyi_thank_you = True

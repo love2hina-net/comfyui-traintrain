@@ -12,15 +12,12 @@ from .comfyui import ToolButton, create_refresh_button
 #from modules.shared import opts
 #from modules.ui import create_output_panel, create_refresh_button
 #from ..trainer import train, trainer, gen
+from ..trainer import trainer
 from packaging import version
 
-#jsonspath = trainer.jsonspath
-#logspath = trainer.logspath
-#presetspath = trainer.presetspath
-path_root = os.path.dirname(os.path.abspath(__file__))
-jsonspath = os.path.normpath(os.path.join(path_root,"../jsons"))
-logspath = os.path.normpath(os.path.join(path_root,"../logs"))
-presetspath = os.path.normpath(os.path.join(path_root,"../presets"))
+jsonspath = trainer.jsonspath
+logspath = trainer.logspath
+presetspath = trainer.presetspath
 
 MODES = ["LoRA", "iLECO", "Difference"]
 
@@ -130,8 +127,7 @@ o_column2 = [train_textencoder_learning_rate,train_seed,train_lr_step_rules, tra
 o_column3 = [train_model_precision, train_lora_precision,save_precision,diff_load_1st_pass, diff_save_1st_pass,diff_1st_pass_only,
                     logging_save_csv,logging_verbose,save_overwrite, save_as_json,model_v_pred]
 
-# trainer.all_configs = r_column1 + r_column2 + r_column3 + row1 + o_column1 + o_column2 + o_column3 + [use_2nd_pass_settings]
-all_configs = r_column1 + r_column2 + r_column3 + row1 + o_column1 + o_column2 + o_column3 + [use_2nd_pass_settings]
+trainer.all_configs = r_column1 + r_column2 + r_column3 + row1 + o_column1 + o_column2 + o_column3 + [use_2nd_pass_settings]
 
 def makeui(sets, pas = 0):
     output = []
@@ -174,7 +170,7 @@ def on_ui_tabs():
         if name is None:
             return json_files
         else:
-            return json_files # trainer.import_json(name, preset = True)
+            return trainer.import_json(name, preset = True)
 
     folder_symbol = '\U0001f4c2'   
     load_symbol = '\u2199\ufe0f'   # ↙
@@ -299,8 +295,7 @@ def on_ui_tabs():
                 delete_queue= gr.Button(value="Delete Queue",elem_classes=["compact_button"],variant='primary')
                 delete_name= gr.Textbox(label="Name of Queue to delete")
             with gr.Row():
-                # queue_list = gr.DataFrame(headers=["Name", "Mode", "Model", "VAE"] + [x[0] for x in trainer.all_configs] * 2 + ["Original prompt", "Target prompt"] )
-                queue_list = gr.DataFrame(headers=["Name", "Mode", "Model", "VAE"] + [x[0] for x in all_configs] * 2 + ["Original prompt", "Target prompt"] )
+                queue_list = gr.DataFrame(headers=["Name", "Mode", "Model", "VAE"] + [x[0] for x in trainer.all_configs] * 2 + ["Original prompt", "Target prompt"] )
 
         with gr.Tab("Plot"):
             with gr.Row():
@@ -362,8 +357,7 @@ def on_ui_tabs():
 
         def change_the_mode(mode):
             mode = MODES.index(mode)
-            #out = [x[5][mode] for x in trainer.all_configs]
-            out = [x[5][mode] for x in all_configs]
+            out = [x[5][mode] for x in trainer.all_configs]
             if mode == 1: #LECO
                 out.extend([False, True, False])
             elif mode > 1: #Difference
@@ -379,7 +373,7 @@ def on_ui_tabs():
         def openfolder_f():
             os.startfile(jsonspath)
 
-        # loadjson.click(trainer.import_json,[sets_file], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
+        loadjson.click(trainer.import_json,[sets_file], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
         loadpreset.click(load_preset,[presets], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
         mode.change(change_the_mode,[mode],[*train_settings_1, diff_2nd, g_leco ,g_diff])
         openfolder.click(openfolder_f)

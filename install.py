@@ -3,12 +3,14 @@ from pip._internal.metadata import get_default_environment
 
 requirements = [
 "gradio",
+"accelerate",
 "diffusers",
 "safetensors",
 "dadaptation",
 "prodigyopt",
 "wandb",
 "lycoris_lora",
+"lion_pytorch",
 "pandas",
 "matplotlib",
 "bitsandbytes"

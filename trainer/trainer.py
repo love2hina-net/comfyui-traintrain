@@ -12,8 +12,7 @@ import torch.nn as nn
 from pprint import pprint
 from accelerate import Accelerator
 import gradio as gr
-from modules.scripts import basedir
-from modules import shared
+from ..scripts.comfyui import basedir, get_lora_dir
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -52,7 +51,7 @@ class Trainer():
         self.count_dict = {}
         self.metadata = {}
 
-        self.save_dir = shared.cmd_opts.lora_dir
+        self.save_dir = get_lora_dir()
         self.setpass(0)
 
         self.image_size = [int(x) for x in self.image_size.split(",")]
