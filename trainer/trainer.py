@@ -110,7 +110,7 @@ class Trainer():
 
             if "diff_load_1st_pass" == sets[0]:
                 found = False
-                value = value if ".safetensors" in value else value + ".safetensors"
+                value = value if value.endswith(".safetensors") else value + ".safetensors"
                 for root, dirs, files in os.walk(self.save_dir):
                     if value in files:
                         value = os.path.join(root, value)
