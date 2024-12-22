@@ -84,11 +84,9 @@ class Trainer():
     # TODO: 2passで呼ばれることが無くなった…
     def setpass(self, root: cfg.ConfigRoot[cfg.ComponentValue], pas: int, set = True) -> None:
         target_values: cfg.ConfigBase[cfg.ComponentValue] = root
-        find_config = lambda key: cfg.get_component(root, key)
         if pas == 1:
             if root.use_2nd_pass_settings.value:
                 target_values = root.second_pass
-                find_config = lambda key: cfg.get_component(root.second_pass, key)
                 if set: print("Use 2nd pass settings")
             else:
                 return
@@ -172,7 +170,7 @@ class Trainer():
                 self.count_dict[tag] = 1
 
 
-def import_json(name, preset = False):
+def import_json(name: str, preset = False):
     def find_files(file_name):
         for root, _, files in os.walk(jsonspath):
             if file_name in files:
@@ -181,7 +179,7 @@ def import_json(name, preset = False):
     if preset:
         filepath = os.path.join(presetspath, name + ".json")
     else:
-        filepath = find_files(name if ".json" in name else name + ".json")
+        filepath = find_files(name if name.endswith(".json") else name + ".json")
 
     output = []
 

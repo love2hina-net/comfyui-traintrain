@@ -113,7 +113,7 @@ class ControlConfig(Enum):
     LOGGING_SAVE_CSV        = ("logging_save_csv", ControlType.CHECKBOX, None, False, bool, EnableConfig.NDIFF2)
     MODEL_V_PRED            = ("model_v_pred", ControlType.CHECKBOX, None, False, bool, EnableConfig.ALL)
 
-    NETWORK_BLOCKS          = ("network_blocks(BASE = TextEncoder)", ControlType.CHECKBOXGROUP, BLOCKID26, BLOCKID26, list[str], EnableConfig.ALL)
+    NETWORK_BLOCKS          = ("network_blocks(BASE = TextEncoder)", ControlType.CHECKBOXGROUP, BLOCKID26, BLOCKID26, list, EnableConfig.ALL)
 
     #unuased parameters
     # LOGGING_USE_WANDB       = ("logging_use_wandb", ControlType.CHECKBOX, None, False, bool)
@@ -273,7 +273,7 @@ class ConfigBase[T]:
             if (isinstance(src_value, ComponentConfig)) and (isinstance(dest_value, ComponentConfig)):
                 dest_value.instance = src_value.instance
             else:
-                logger.debug(f"Unexpected variable type in copy: {key}")
+                logger.debug(f"[TrainTrain] Unexpected variable type in copy: {key}")
 
 
 @dataclass(init=False, slots=True)
@@ -291,8 +291,8 @@ class ConfigRoot[T](ConfigBase[T]):
 
     @typing.override
     def __init__(self, type: T):
-        # NOTE: super() が使えない
-        # https://github.com/python/cpython/issues/90562
+        # NOTE: Python 3.12.8 では super() が使えない
+        # BUG: https://github.com/python/cpython/issues/90562
         super(ConfigRoot, self).__init__(type)
         self.mode = type(ControlConfig.MODE)
         self.model = type(ControlConfig.MODEL)
@@ -426,33 +426,43 @@ def _concat_blocksets(base: set[Block], append: Block | typing.Sequence[Block] |
         result.update(append)
     return result
 
-def _input_mapping(result: ConfigRoot[ComponentValue], args: dict) -> None:
-    for component in result.components(ComponentValue):
-        component.value = args[component.instance]
-
 def _input_convert(config: ConfigRoot[ComponentConfig], args: dict) -> ConfigRoot[ComponentValue]:
     # 返却用のコピーオブジェクトを作成
     result = ConfigRoot(ComponentValue)
     config.copy(result)
-    # マッピング
-    _input_mapping(result, args)
-    _input_mapping(result.second_pass, args)
+
+    # 入力マッピング
+    def mapping(values: ConfigRoot[ComponentValue]) -> None:
+        for component in values.components(ComponentValue):
+            component.value = args[component.instance]
+
+    mapping(result)
+    mapping(result.second_pass)
     return result
 
-def _output_mapping(src: ConfigRoot[ComponentValue], result: dict) -> None:
-    for component in src.components(ComponentValue):
-        if not component.update is None:
-            result[component.instance] = component.update
-
-def _output_convert(src: ConfigRoot[ComponentValue], result: typing.Any) -> dict:
+def _output_convert(values: ConfigRoot[ComponentValue], result: typing.Any) -> dict:
     updates = {}
+
     # 出力マッピング
-    _output_mapping(src, updates)
-    _output_mapping(src.second_pass, updates)
+    def mapping(values: ConfigRoot[ComponentValue]) -> None:
+        for component in values.components(ComponentValue):
+            if not component.update is None:
+                updates[component.instance] = component.update
+
+    mapping(values)
+    mapping(values.second_pass)
+
     # 通常の関数戻り値を追加する
     if not result is None:
         updates |= result
     return updates
+
+def _converter(config: ConfigRoot[ComponentConfig],
+               fn: typing.Callable[[ConfigRoot[ComponentValue], dict], dict[Block, typing.Any] | None],
+               args: dict
+               ) -> dict:
+    values = _input_convert(config, args)
+    return _output_convert(values, fn(values, args))
 
 def click_proxy(config: ConfigRoot[ComponentConfig],
                 button: gr.Button,
@@ -462,7 +472,7 @@ def click_proxy(config: ConfigRoot[ComponentConfig],
                 ) -> None:
     
     button.click(
-        fn=lambda args: fn(_input_convert(config, args), args),
+        fn=lambda args: _converter(config, fn, args),
         inputs=_concat_blocksets(config._COMPORNENTS, inputs),
         outputs=_concat_blocksets(config._COMPORNENTS, outputs))
 
@@ -474,11 +484,11 @@ def change_proxy(config: ConfigRoot[ComponentConfig],
                  ) -> None:
     
     radio.change(
-        fn=lambda args: _output_convert(config, fn(_input_convert(config, args), args)),
+        fn=lambda args: _converter(config, fn, args),
         inputs=_concat_blocksets(config._COMPORNENTS, inputs),
         outputs=_concat_blocksets(config._COMPORNENTS, outputs))
 
-def as_dict(config: ConfigRoot[ComponentValue]) -> dict:
+def as_dict(config: ConfigRoot[ComponentValue]) -> dict[str, typing.Any]:
     result = {}
     # 1st pass
     for component in config.components(ComponentValue):
@@ -489,9 +499,9 @@ def as_dict(config: ConfigRoot[ComponentValue]) -> dict:
         result["2nd pass"][component.config.NAME] = component.value
     return result
 
-def export_json(dir: str, value: dict, timestamp: bool = False) -> None:
+def export_json(dir: str, values: dict[str, typing.Any], timestamp: bool = False) -> None:
     current_time = datetime.now()
-    export = copy.deepcopy(value)
+    export = copy.deepcopy(values)
 
     # 2nd passを付与するかどうか
     if (export["mode"] != "Difference") and ("2nd pass" in export):
@@ -502,5 +512,51 @@ def export_json(dir: str, value: dict, timestamp: bool = False) -> None:
     filepath = os.path.join(dir, f"{export['save_lora_name']}{add}.json")
     if not os.path.exists(dir):
         os.makedirs(dir)
-    with open(filepath, "w") as file:
-        json.dump(export, file, indent=4)
+    with open(filepath, "w", encoding='utf-8') as file:
+        json.dump(export, file, indent=4, sort_keys=True)
+
+def apply_dict(config: ConfigRoot[ComponentValue], values: dict[str, typing.Any]) -> None:
+    def find_value_dropdown(value: typing.Any, choices: typing.Any) -> bool:
+        result = False
+        if (isinstance(choices, list)) and (len(choices) > 0):
+            if isinstance(choices[0], tuple):
+                # キーと値の組み合わせ
+                result = (value in [x[1] for x in choices])
+            else:
+                # 値のみ
+                result = (value in choices)
+        return result
+
+    def applier(component: ComponentValue, dic: dict[str, typing.Any]) -> None:
+        if component.config.NAME in dic:
+            value = dic[component.config.NAME]
+            if not isinstance(value, component.config.VALUE_TYPE):
+                try:
+                    value = component.config.VALUE_TYPE(value)
+                except ValueError:
+                    logger.warning(f"[TrainTrain] Ignored value: Illegal value type. {component.config.NAME}={dic[component.config.NAME]}")
+                    value = component.config.DEFAULT
+            if component.config.CONTROL_TYPE == ControlType.DROPDOWN:
+                if (component.instance.choices is None) or (len(component.instance.choices) == 0):
+                    logger.warning(f"[TrainTrain] Ignored value: The list of choices was Empty. {component.config.NAME}")
+                    value = None
+                elif not find_value_dropdown(value, component.instance.choices):
+                    logger.warning(f"[TrainTrain] Ignored value: Not in the list of choices. {component.config.NAME}={value}")
+                    value = component.config.DEFAULT if not component.config.DEFAULT is None else component.instance.choices[0]
+        else:
+            value = component.config.DEFAULT
+
+        component.value = value
+        component.update = value
+
+    # 1st pass
+    for component in config.components(ComponentValue):
+        applier(component, values)
+    # 2nd pass
+    if "2nd pass" in values:
+        for component in config.second_pass.components(ComponentValue):
+            applier(component, values["2nd pass"])
+
+def import_json(filepath: str) -> dict[str, typing.Any]:
+    with open(filepath, "r", encoding='utf-8') as file:
+        return json.load(file)

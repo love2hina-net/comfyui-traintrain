@@ -1,6 +1,7 @@
 from cProfile import label
 from typing import Iterable, Any
 import os
+import logging
 import pandas as pd
 import matplotlib.pyplot as plt
 import gradio as gr
@@ -17,6 +18,9 @@ from .comfyui import ToolButton, create_refresh_button
 from ..trainer import config as cfg, train, trainer
 from ..trainer.config import ControlConfig
 from packaging import version
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 jsonspath = trainer.JSONSPATH
 logspath = trainer.LOGSPATH
@@ -113,11 +117,17 @@ def on_ui_tabs():
         with os.scandir(trainer.PRESETSPATH) as it:
             for entry in it:
                 if entry.is_file() and entry.name.endswith('.json'):
-                    json_files.append(entry.name.replace(".json", ""))
+                    json_files.append(entry.name.removesuffix(".json"))
 
         return json_files
-        # else:
-        #     return trainer.import_json(name, preset = True)
+    
+    def load_preset(config: cfg.ConfigRoot[cfg.ComponentValue], components: dict) -> None:
+        json_select = components[presets]
+        filepath = os.path.join(trainer.PRESETSPATH, f"{json_select}.json")
+        if os.path.exists(filepath):
+            cfg.apply_dict(config, cfg.import_json(filepath))
+        else:
+            logger.error(f"[TrainTrain] Loading preset was failed, because file not found: {filepath}")
 
     def save_preset(config: cfg.ConfigRoot[cfg.ComponentValue], components: dict) -> dict[Block, Any]:
         cfg.export_json(trainer.PRESETSPATH, cfg.as_dict(config), False)
@@ -367,7 +377,7 @@ def on_ui_tabs():
             os.startfile(jsonspath)
 
         # loadjson.click(trainer.import_json,[sets_file], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
-        # loadpreset.click(load_preset,[presets], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
+        cfg.click_proxy(CONFIG_ROOT, loadpreset, load_preset, { presets }, None)
         cfg.change_proxy(CONFIG_ROOT, mode, change_the_mode, None, { diff_2nd, g_leco, g_diff })
         openfolder.click(openfolder_f)
         # copy.click(lambda *x: x, train_settings_1[1:], train_settings_2[1:])
