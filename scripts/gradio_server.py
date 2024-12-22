@@ -21,7 +21,7 @@ class GradioServer:
 
     def launch(this) -> None:
         if not this.BLOCKS:
-            this.BLOCKS, _, _ = traintrain.on_ui_tabs()[0]
+            this.BLOCKS, _, _ = traintrain.on_ui_tabs()
             this.APP, this.LOCAL_URL, this.SHARE_URL = this.BLOCKS.launch(prevent_thread_lock=True)
 
     def close(this) -> None:
