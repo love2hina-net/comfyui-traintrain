@@ -203,72 +203,49 @@ def on_ui_tabs():
             gr.HTML(value="Required Parameters(+prompt in iLECO, +images in Difference)")
             with gr.Row():
                 with gr.Column(variant="compact"):
-                    col1_r1 = mapping_ui(CONFIG_ROOT, R_COLUMN1)
-                    locals().update(col1_r1)
+                    mapping_ui(CONFIG_ROOT, R_COLUMN1)
                 with gr.Column(variant="compact"):
-                    col2_r1 = mapping_ui(CONFIG_ROOT, R_COLUMN2)
-                    locals().update(col2_r1)
+                    mapping_ui(CONFIG_ROOT, R_COLUMN2)
                 with gr.Column(variant="compact"):
-                    col3_r1 = mapping_ui(CONFIG_ROOT, R_COLUMN3)
-                    locals().update(col3_r1)
+                    mapping_ui(CONFIG_ROOT, R_COLUMN3)
             with gr.Row():
-                blocks_grs_1 = mapping_ui(CONFIG_ROOT, ROW1)
-                locals().update(blocks_grs_1)
+                mapping_ui(CONFIG_ROOT, ROW1)
 
             gr.HTML(value="Option Parameters")
             with gr.Row():
                 with gr.Column(variant="compact"):
-                    col1_o1 = mapping_ui(CONFIG_ROOT, O_COLUMN1)
-                    locals().update(col1_o1)
+                    mapping_ui(CONFIG_ROOT, O_COLUMN1)
                 with gr.Column(variant="compact"):
-                    col2_o1 = mapping_ui(CONFIG_ROOT, O_COLUMN2)
-                    locals().update(col2_o1)
+                    mapping_ui(CONFIG_ROOT, O_COLUMN2)
                 with gr.Column(variant="compact"):
-                    col3_o1 = mapping_ui(CONFIG_ROOT, O_COLUMN3)
-                    locals().update(col3_o1)
-
-                train_settings_1 = col1_r1 | col2_r1 | col3_r1 | blocks_grs_1 | col1_o1 | col2_o1 | col3_o1
+                    mapping_ui(CONFIG_ROOT, O_COLUMN3)
 
             with gr.Accordion("2nd pass", open= False, visible = False) as diff_2nd:
                 with gr.Row():
-                    use_2nd = mapping_ui(CONFIG_ROOT, (ControlConfig.USE_2ND_PASS_SETTINGS,))
-                    locals().update(use_2nd)
+                    mapping_ui(CONFIG_ROOT, (ControlConfig.USE_2ND_PASS_SETTINGS,))
                     copy = gr.Button(value= "Copy settings from 1st pass")
                 gr.HTML(value="Required Parameters")
                 with gr.Row():  
                     with gr.Column(variant="compact"):
-                        col1_r2 = mapping_ui(CONFIG_ROOT.second_pass, R_COLUMN1)
-                        locals().update(col1_r2)
+                        mapping_ui(CONFIG_ROOT.second_pass, R_COLUMN1)
                     with gr.Column(variant="compact"):
-                        col2_r2 = mapping_ui(CONFIG_ROOT.second_pass, R_COLUMN2)
-                        locals().update(col2_r2)
+                        mapping_ui(CONFIG_ROOT.second_pass, R_COLUMN2)
                     with gr.Column(variant="compact"):
-                        col3_r2 = mapping_ui(CONFIG_ROOT.second_pass, R_COLUMN3)
-                        locals().update(col3_r2)
+                        mapping_ui(CONFIG_ROOT.second_pass, R_COLUMN3)
                 with gr.Row():
-                    blocks_grs_2 = mapping_ui(CONFIG_ROOT.second_pass, ROW1)
-                    locals().update(blocks_grs_2)
+                    mapping_ui(CONFIG_ROOT.second_pass, ROW1)
 
                 gr.HTML(value="Option Parameters")
                 with gr.Row():
                     with gr.Column(variant="compact"):
-                        col1_o2 = mapping_ui(CONFIG_ROOT.second_pass, O_COLUMN1)
-                        locals().update(col1_o2)
+                        mapping_ui(CONFIG_ROOT.second_pass, O_COLUMN1)
                     with gr.Column(variant="compact"):
-                        col2_o2 = mapping_ui(CONFIG_ROOT.second_pass, O_COLUMN2)
-                        locals().update(col2_o2)
+                        mapping_ui(CONFIG_ROOT.second_pass, O_COLUMN2)
                     with gr.Column(variant="compact"):
-                        col3_o2 = mapping_ui(CONFIG_ROOT.second_pass, O_COLUMN3)
-                        locals().update(col3_o2)
-                        
-                train_settings_2 = col1_r2 | col2_r2 | col3_r2 | blocks_grs_2 | col1_o2 | col2_o2 | col3_o2 | use_2nd
+                        mapping_ui(CONFIG_ROOT.second_pass, O_COLUMN3)
 
             with gr.Group(visible=False) as g_leco:
                 prompts = mapping_ui(CONFIG_ROOT, (ControlConfig.ORIGINAL_PROMPT, ControlConfig.TARGET_PROMPT))
-                # with gr.Row():
-                #     orig_prompt = gr.TextArea(label="Original Prompt",lines=3)
-                # with gr.Row():
-                #     targ_prompt = gr.TextArea(label="Target Prompt",lines=3)
                 with gr.Row():
                     neg_prompt = gr.TextArea(label="Negative Prompt(not userd in training)",lines=3)
                 with gr.Row():
@@ -298,7 +275,8 @@ def on_ui_tabs():
                 delete_queue= gr.Button(value="Delete Queue",elem_classes=["compact_button"],variant='primary')
                 delete_name= gr.Textbox(label="Name of Queue to delete")
             with gr.Row():
-                queue_list = gr.DataFrame(headers=["Name", "Mode", "Model", "Model Type", "VAE"] + [x.NAME for x in trainer.all_configs] * 2 + ["Original prompt", "Target prompt"] )
+                # queue_list = gr.DataFrame(headers=["Name", "Mode", "Model", "Model Type", "VAE"] + [x.NAME for x in trainer.all_configs] * 2 + ["Original prompt", "Target prompt"] )
+                queue_list = gr.DataFrame()
 
         with gr.Tab("Plot"):
             with gr.Row():
@@ -343,13 +321,17 @@ def on_ui_tabs():
         angle_bg.click(change_angle_bg,[dtrue, image_dir, save_dir, input_image,output_name, num_of_images ,change_angle,max_tilting_angle, change_scale, min_scale, fix_side], [image_result])
         angle_bg_i.click(change_angle_bg,[dfalse, image_dir, save_dir, input_image,output_name, num_of_images ,change_angle,max_tilting_angle, change_scale, min_scale, fix_side], [image_result])
 
-        # start.click(train.train, [dfalse, mode, model, model_type, vae, *train_settings_1, *train_settings_2, *prompts, *in_images],[result])
-        cfg.click_proxy(CONFIG_ROOT, queue, lambda config, components: train.queue(config), { neg_prompt, orig_image, targ_image }, result)
-        cfg.click_proxy(CONFIG_ROOT, savepreset, save_preset, None, { presets })
+        cfg.event_proxy(CONFIG_ROOT, start.click,
+                        lambda config, components: train.train(config, components[neg_prompt], components[orig_image], components[targ_image]),
+                        { neg_prompt, orig_image, targ_image }, result)
+        cfg.event_proxy(CONFIG_ROOT, queue.click,
+                        lambda config, components: train.queue(config, components[neg_prompt], components[orig_image], components[targ_image]),
+                        { neg_prompt, orig_image, targ_image }, result)
+        cfg.event_proxy(CONFIG_ROOT, savepreset.click, save_preset, None, { presets })
         refleshpreset.click(lambda : gr.update(choices=list_presets()), outputs = presets)
 
-        reload_queue.click(train.get_del_queue_list, outputs= queue_list)
-        delete_queue.click(train.get_del_queue_list, inputs = [delete_name], outputs= queue_list)
+        reload_queue.click(train.get_del_queue_list, outputs=queue_list)
+        delete_queue.click(train.get_del_queue_list, inputs=[delete_name], outputs=queue_list)
 
         stop.click(train.stop_time,[dfalse],[result])
         stop_save.click(train.stop_time,[dtrue],[result])
@@ -377,8 +359,8 @@ def on_ui_tabs():
             os.startfile(jsonspath)
 
         # loadjson.click(trainer.import_json,[sets_file], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
-        cfg.click_proxy(CONFIG_ROOT, loadpreset, load_preset, { presets }, None)
-        cfg.change_proxy(CONFIG_ROOT, mode, change_the_mode, None, { diff_2nd, g_leco, g_diff })
+        cfg.event_proxy(CONFIG_ROOT, loadpreset.click, load_preset, { presets }, None)
+        cfg.event_proxy(CONFIG_ROOT, mode.change, change_the_mode, None, { diff_2nd, g_leco, g_diff })
         openfolder.click(openfolder_f)
         # copy.click(lambda *x: x, train_settings_1[1:], train_settings_2[1:])
 

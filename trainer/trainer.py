@@ -35,8 +35,6 @@ from diffusers import (
     AutoencoderKL,
 )
 
-all_configs: Sequence[cfg.ControlConfig] = []
-
 PASS2 = "2nd pass"
 
 PATH_ROOT = basedir()
@@ -170,53 +168,53 @@ class Trainer():
                 self.count_dict[tag] = 1
 
 
-def import_json(name: str, preset = False):
-    def find_files(file_name):
-        for root, _, files in os.walk(jsonspath):
-            if file_name in files:
-                return os.path.join(root, file_name)
-        return None
-    if preset:
-        filepath = os.path.join(presetspath, name + ".json")
-    else:
-        filepath = find_files(name if name.endswith(".json") else name + ".json")
+# def import_json(name: str, preset = False):
+#     def find_files(file_name):
+#         for root, _, files in os.walk(jsonspath):
+#             if file_name in files:
+#                 return os.path.join(root, file_name)
+#         return None
+#     if preset:
+#         filepath = os.path.join(presetspath, name + ".json")
+#     else:
+#         filepath = find_files(name if name.endswith(".json") else name + ".json")
 
-    output = []
+#     output = []
 
-    if filepath is None:
-        return [gr.update()] * len(all_configs)
-    with open(filepath, 'r', encoding='utf-8') as file:
-        data = json.load(file)
+#     if filepath is None:
+#         return [gr.update()] * len(all_configs)
+#     with open(filepath, 'r', encoding='utf-8') as file:
+#         data = json.load(file)
     
-    def setconfigs(data, output):
-        for key, gtype ,_ ,default , dtype, _ in all_configs:
-            if key in data:
-                if key == PASS2: continue
-                if gtype == "DD" or "learning rate" in key:
-                    dtype = str
-                try:
-                    output.append(dtype(data[key]))
-                except:
-                    output.append(default)
-            else:
-                output.append(default)
-    setconfigs(data, output)
+#     def setconfigs(data, output):
+#         for key, gtype ,_ ,default , dtype, _ in all_configs:
+#             if key in data:
+#                 if key == PASS2: continue
+#                 if gtype == "DD" or "learning rate" in key:
+#                     dtype = str
+#                 try:
+#                     output.append(dtype(data[key]))
+#                 except:
+#                     output.append(default)
+#             else:
+#                 output.append(default)
+#     setconfigs(data, output)
 
-    if PASS2 in data and data[PASS2]:
-        setconfigs(data[PASS2], output)
-    else:
-        output = output * 2
+#     if PASS2 in data and data[PASS2]:
+#         setconfigs(data[PASS2], output)
+#     else:
+#         output = output * 2
 
-    output.append(data["original prompt"] if "original prompt" in data else "")
-    output.append(data["target prompt"] if "target prompt" in data else "")
-    output.append("")
+#     output.append(data["original prompt"] if "original prompt" in data else "")
+#     output.append(data["target prompt"] if "target prompt" in data else "")
+#     output.append("")
     
-    head = []
-    head.append(data["mode"] if "mode" in data else "LoRA")
-    head.append(data["model"] if "model" in data else None)
-    head.append(data["vae"] if "vae" in data else None)
+#     head = []
+#     head.append(data["mode"] if "mode" in data else "LoRA")
+#     head.append(data["model"] if "model" in data else None)
+#     head.append(data["vae"] if "vae" in data else None)
 
-    return head + output
+#     return head + output
 
 AVAILABLE_SCHEDULERS = Literal["ddim", "ddpm", "lms", "euler_a"]
 

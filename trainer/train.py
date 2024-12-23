@@ -2,24 +2,29 @@ import os
 import csv
 import random
 import time
-import numpy
 import gc
 import json
-from enum import StrEnum
-from PIL import Image
+import logging
 from typing import Any
+from enum import StrEnum
+
+import numpy
+from PIL import Image
 import traceback
 import torch
 from tqdm import tqdm
 import folder_paths
-from .lora import LoRANetwork, LycorisNetwork
-from . import trainer, dataset
 from diffusers.optimization import get_scheduler
-from pprint import pprint
 from accelerate.utils import set_seed
 from diffusers.models import AutoencoderKL
 from transformers.optimization import AdafactorSchedule
+
+from .lora import LoRANetwork, LycorisNetwork
+from . import trainer, dataset
 from . import config as cfg
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 MAX_DENOISING_STEPS = 1000
 ML = "LoRA"
@@ -30,9 +35,6 @@ class ModelType(StrEnum):
     SDv2 = "sd_v2"
     SDXL = "sdxl_base_v1-0"
 
-jsonspath = trainer.JSONSPATH
-logspath = trainer.LOGSPATH
-
 stoptimer = 0
 
 CUDA = torch.device("cuda:0")
@@ -40,14 +42,21 @@ CUDA = torch.device("cuda:0")
 queue_list: dict[str, dict] = []
 current_name = None
 
-def queue(config: dict) -> str:
+def queue(config: cfg.ConfigRoot[cfg.ComponentValue],
+          negative_prompt: str,
+          original_image: Any,
+          target_image: Any) -> str:
     global queue_list
-    key = config["save_lora_name"]
 
+    key = config.save_lora_name.value
     if (key == current_name) or (key in queue_list):
         return "Duplicated LoRA name! Could not add to queue."
     else:
-        queue_list.append(config)
+        dic_config = cfg.as_dict(config)
+        dic_config["negative_prompt"] = negative_prompt
+        dic_config["original_image"] = original_image
+        dic_config["target_image"] = target_image
+        queue_list.append(dic_config)
         return "Added to Queue"
 
 def get_del_queue_list(del_name: str | None = None) -> list[dict]:
@@ -58,54 +67,60 @@ def get_del_queue_list(del_name: str | None = None) -> list[dict]:
 
     return queue_list.values()
 
-def setcurrentname(config: dict):
+def train(config: cfg.ConfigRoot[cfg.ComponentValue],
+          negative_prompt: str,
+          original_image: Any,
+          target_image: Any) -> str:
     global current_name
-    current_name = config["save_lora_name"]
 
-def train(config: dict) -> str:
-    setcurrentname(config)
-    result = _train_main(config)
+    # BUG: キューの実行中に防ぐ目的なら、ここで設定するのは不適切
+    current_name = config.save_lora_name.value
+    result = _train_main(config, negative_prompt, original_image, target_image)
 
     # キューの処理
     while len(queue_list) > 0:
-        _, queue_config = queue_list.popitem()
-        result +="\n" + _train_main(queue_config)
+        _, dic_value = queue_list.popitem()
+        # コピーし、復元
+        queue_config = config.copy(cfg.ComponentValue)
+        cfg.apply_dict(queue_config, dic_value)
+        # 実行
+        result +="\n" + _train_main(queue_config, dic_value["negative_prompt"], dic_value["original_image"], dic_value["target_image"])
+
     return result
 
-def _train_main(root: cfg.ConfigRoot[cfg.ComponentValue],
+def _train_main(config: cfg.ConfigRoot[cfg.ComponentValue],
                 negative_prompt: str,
                 original_image: Any,
-                target_image: Any
-                ) -> str:
-    t = trainer.Trainer(root, negative_prompt, original_image, target_image)
+                target_image: Any) -> str:
+    t = trainer.Trainer(config, negative_prompt, original_image, target_image)
 
     if t.isfile:
         return "File exist!"
 
-    print("[TrainTrain] Start Training!")
+    logger.info("[TrainTrain] Start Training!")
 
-    checkpoint_filename = folder_paths.get_full_path("checkpoints", modelname)
+    checkpoint_filename = folder_paths.get_full_path("checkpoints", config.model.value)
     if not os.path.exists(checkpoint_filename):
         return f"Error: Checkpoint {checkpoint_filename} not found!"
 
     vae = None
 
     # TODO: 本来はLoad前にStableDiffusionバージョンを確認
-    t.isxl = (modeltype == ModelType.SDXL)
-    t.isv2 = (modeltype == ModelType.SDv2)
+    t.isxl = (config.model_type.value == ModelType.SDXL)
+    t.isv2 = (config.model_type.value == ModelType.SDv2)
 
     t.vae_scale_factor = 0.13025 if t.isxl else 0.18215
 
-    t.model_version = modeltype.value
+    t.model_version = config.model_type.value.value
 
     if t.mode != ML:
         t.orig_cond, t.orig_vector  = text2cond(t, t.prompts[0])
         t.targ_cond, t.targ_vector  = text2cond(t, t.prompts[1])
         t.un_cond, t.un_vector = text2cond(t, t.prompts[2])
 
-    print("[TrainTrain] Preparing the Model...")
+    logger.info("[TrainTrain] Preparing the Model...")
 
-    vae_path = folder_paths.get_full_path("vae", vaename)
+    vae_path = folder_paths.get_full_path("vae", config.vae.value)
     if not vae:
         vae = AutoencoderKL.from_single_file(vae_path) if vae_path is not None else None
 
@@ -117,9 +132,9 @@ def _train_main(root: cfg.ConfigRoot[cfg.ComponentValue],
     unet.to(CUDA, dtype=t.train_model_precision)
     try:
         unet.enable_xformers_memory_efficient_attention()
-        print("[TrainTrain] Enabling Xformers")
+        logger.info("[TrainTrain] Enabling Xformers")
     except:
-        print("[TrainTrain] Failed to enable Xformers")
+        logger.info("[TrainTrain] Disabled Xformers")
 
     unet.requires_grad_(False)
     unet.eval()
@@ -168,10 +183,10 @@ def _train_main(root: cfg.ConfigRoot[cfg.ComponentValue],
         else:
             result = "Test mode"
 
-        print("[TrainTrain] Done.")
+        logger.info("[TrainTrain] Done.")
 
     except Exception as e:
-        print(traceback.format_exc())
+        logger.error(f"[TrainTrain] Error: Failed Training: {config.save_lora_name.value}", exc_info=True)
         result =  f"Error: {e}"
 
     del t
@@ -428,7 +443,7 @@ def create_network(t):
     return network, optimizer, lr_scheduler
 
 def load_network(t):
-    types = trainer.all_configs[get_name_index("network_type")].CHOICES
+    types = cfg.NETWORK_TYPES
     if t.network_type in types[:2]:
         return LoRANetwork(t).to(CUDA, dtype=t.train_lora_precision)
     else:

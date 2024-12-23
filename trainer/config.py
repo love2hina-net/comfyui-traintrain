@@ -464,29 +464,25 @@ def _converter(config: ConfigRoot[ComponentConfig],
     values = _input_convert(config, args)
     return _output_convert(values, fn(values, args))
 
-def click_proxy(config: ConfigRoot[ComponentConfig],
-                button: gr.Button,
-                fn: typing.Callable[[ConfigRoot[ComponentValue], dict], dict[Block, typing.Any] | None],
+class EventHandler(typing.Protocol):
+    def __call__(self,
+                 fn: typing.Callable[..., typing.Any] | None = None,
+                 inputs: Block | typing.Sequence[Block] | set[Block] | None = None,
+                 outputs: Block | typing.Sequence[Block] | None = None,
+                 **kwargs: typing.Any) -> typing.Any:
+        ...
+
+def event_proxy(config: ConfigRoot[ComponentConfig],
+                event: EventHandler,
+                callback: typing.Callable[[ConfigRoot[ComponentValue], dict], dict[Block, typing.Any] | None],
                 inputs: Block | typing.Sequence[Block] | set[Block] | None = None,
                 outputs: Block | typing.Sequence[Block] | set[Block] | None = None,
-                ) -> None:
-    
-    button.click(
-        fn=lambda args: _converter(config, fn, args),
-        inputs=_concat_blocksets(config._COMPORNENTS, inputs),
-        outputs=_concat_blocksets(config._COMPORNENTS, outputs))
+                **kwargs: typing.Any) -> None:
 
-def change_proxy(config: ConfigRoot[ComponentConfig],
-                 radio: gr.Radio,
-                 fn: typing.Callable[[ConfigRoot[ComponentValue], dict], dict[Block, typing.Any] | None],
-                 inputs: Block | typing.Sequence[Block] | set[Block] | None = None,
-                 outputs: Block | typing.Sequence[Block] | set[Block] | None = None,
-                 ) -> None:
-    
-    radio.change(
-        fn=lambda args: _converter(config, fn, args),
-        inputs=_concat_blocksets(config._COMPORNENTS, inputs),
-        outputs=_concat_blocksets(config._COMPORNENTS, outputs))
+    event(fn=lambda args: _converter(config, callback, args),
+          inputs=_concat_blocksets(config._COMPORNENTS, inputs),
+          outputs=_concat_blocksets(config._COMPORNENTS, outputs),
+          **kwargs)
 
 def as_dict(config: ConfigRoot[ComponentValue]) -> dict[str, typing.Any]:
     result = {}
