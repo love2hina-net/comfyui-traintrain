@@ -194,7 +194,7 @@ class ConfigBase[T]:
     save_as_json: T
     model_v_pred: T
 
-    _ALL_KEYS: set[str]
+    _ALL_KEYS: list[str]
     """
     すべての要素のキーを保持します.
 
@@ -249,7 +249,7 @@ class ConfigBase[T]:
         self.save_overwrite = type(ControlConfig.SAVE_OVERWRITE)
         self.save_as_json = type(ControlConfig.SAVE_AS_JSON)
         self.model_v_pred = type(ControlConfig.MODEL_V_PRED)
-        self._ALL_KEYS = set(self.__slots__)
+        self._ALL_KEYS = list(self.__slots__)
 
     def components[T](self, type: T=ComponentConfig) -> typing.Iterator[T]:
         """
@@ -304,7 +304,7 @@ class ConfigRoot[T](ConfigBase[T]):
         self.second_pass = ConfigBase[T](type)
 
         # 内部用
-        self._ALL_KEYS = set(super(ConfigRoot, self).__slots__) | set(self.__slots__)
+        self._ALL_KEYS = list(super(ConfigRoot, self).__slots__) + list(self.__slots__)
         self._COMPORNENTS = None
 
     @typing.override
@@ -319,19 +319,19 @@ def get_component[T](config: ConfigBase[T], name: str, type: T=ComponentConfig) 
     for component in config.components(type):
         if component.config.NAME == name:
             return component
-    raise AttributeError(f"ControlConfig {name} not found")
+    raise KeyError(f"ControlConfig {name} not found")
 
 def get_value(config: ConfigBase[ComponentValue], name: str) -> typing.Any:
     for component in config.components(ComponentValue):
         if component.config.NAME == name:
             return component.value
-    raise AttributeError(f"ControlConfig {name} not found")
+    raise KeyError(f"ControlConfig {name} not found")
 
 def get_instance(config: ConfigBase[ComponentConfig], target: ControlConfig) -> Component:
     for component in config.components(ComponentConfig):
         if component.config == target:
             return component.instance
-    raise AttributeError(f"ControlConfig {config} not found")
+    raise KeyError(f"ControlConfig {config} not found")
 
 def _create_control(value: ComponentConfig, pas: int = 0) -> Component:
     instance = None
@@ -398,7 +398,7 @@ def _create_control(value: ComponentConfig, pas: int = 0) -> Component:
                 interactive=True,
                 render=False)
         case _:
-            raise AttributeError(f"ControlType {value.config.CONTROL_TYPE} was illegal type")
+            raise ValueError(f"ControlType {value.config.CONTROL_TYPE} was illegal type")
 
     value.instance = instance
     return instance
@@ -426,21 +426,47 @@ def _concat_blocksets(base: set[Block], append: Block | typing.Sequence[Block] |
         result.update(append)
     return result
 
-def _input_convert(config: ConfigRoot[ComponentConfig], args: dict) -> ConfigRoot[ComponentValue]:
+def _input_convert(config: ConfigRoot[ComponentConfig],
+                   inputs: Block | typing.Sequence[Block] | set[Block] | None,
+                   args: dict) -> tuple[ConfigRoot[ComponentValue], typing.Any]:
     # 返却用のコピーオブジェクトを作成
-    result = ConfigRoot(ComponentValue)
-    config.copy(result)
+    values = ConfigRoot(ComponentValue)
+    config.copy(values)
 
     # 入力マッピング
     def mapping(values: ConfigRoot[ComponentValue]) -> None:
         for component in values.components(ComponentValue):
             component.value = args[component.instance]
 
-    mapping(result)
-    mapping(result.second_pass)
-    return result
+    mapping(values)
+    mapping(values.second_pass)
 
-def _output_convert(values: ConfigRoot[ComponentValue], result: typing.Any) -> dict:
+    # 追加の入力をマッピング
+    append_args = None
+    if inputs is None:
+        pass
+    elif isinstance(inputs, Block):
+        append_args = args[inputs]
+    elif isinstance(inputs, dict):
+        append_args = {}
+        for component in inputs.keys():
+            if not isinstance(component, Block):
+                raise TypeError(f"Input type {type(component)} was illegal type")
+            append_args[component] = args[component]
+    elif isinstance(inputs, typing.Sequence):
+        append_args = []
+        for component in inputs:
+            if not isinstance(component, Block):
+                raise TypeError(f"Input type {type(component)} was illegal type")
+            append_args.append(args[component])
+    else:
+        raise TypeError(f"Input type {type(inputs)} was illegal type")
+
+    return values, append_args
+
+def _output_convert(values: ConfigRoot[ComponentValue],
+                    outputs: Block | typing.Sequence[Block] | set[Block] | None,
+                    result: typing.Any | None) -> dict:
     updates = {}
 
     # 出力マッピング
@@ -453,16 +479,34 @@ def _output_convert(values: ConfigRoot[ComponentValue], result: typing.Any) -> d
     mapping(values.second_pass)
 
     # 通常の関数戻り値を追加する
-    if not result is None:
-        updates |= result
+    if outputs is None:
+        pass
+    elif isinstance(outputs, Block):
+        updates[outputs] = result
+    elif isinstance(result, dict):
+        for key, value in result.items():
+            if not isinstance(key, Block):
+                raise TypeError(f"Return type {type(key)} was illegal type")
+            else:
+                updates[key] = value
+    elif isinstance(outputs, typing.Sequence):
+        if len(outputs) != len(result):
+            raise IndexError(f"Return length {len(result)} and output length {len(outputs)} was not matched")
+        for i in range(len(outputs)):
+            updates[outputs[i]] = result[i]
+    else:
+        raise TypeError(f"Output type {type(result)} was illegal type")
+
     return updates
 
 def _converter(config: ConfigRoot[ComponentConfig],
-               fn: typing.Callable[[ConfigRoot[ComponentValue], dict], dict[Block, typing.Any] | None],
+               callback: typing.Callable[[ConfigRoot[ComponentValue], typing.Any], typing.Any | None],
+               inputs: Block | typing.Sequence[Block] | set[Block] | None,
+               outputs: Block | typing.Sequence[Block] | set[Block] | None,
                args: dict
                ) -> dict:
-    values = _input_convert(config, args)
-    return _output_convert(values, fn(values, args))
+    values, append = _input_convert(config, inputs, args)
+    return _output_convert(values, outputs, callback(values, append))
 
 class EventHandler(typing.Protocol):
     def __call__(self,
@@ -474,12 +518,12 @@ class EventHandler(typing.Protocol):
 
 def event_proxy(config: ConfigRoot[ComponentConfig],
                 event: EventHandler,
-                callback: typing.Callable[[ConfigRoot[ComponentValue], dict], dict[Block, typing.Any] | None],
+                callback: typing.Callable[[ConfigRoot[ComponentValue], typing.Any], typing.Any | None],
                 inputs: Block | typing.Sequence[Block] | set[Block] | None = None,
                 outputs: Block | typing.Sequence[Block] | set[Block] | None = None,
                 **kwargs: typing.Any) -> None:
 
-    event(fn=lambda args: _converter(config, callback, args),
+    event(fn=lambda args: _converter(config, callback, inputs, outputs, args),
           inputs=_concat_blocksets(config._COMPORNENTS, inputs),
           outputs=_concat_blocksets(config._COMPORNENTS, outputs),
           **kwargs)
@@ -509,7 +553,7 @@ def export_json(dir: str, values: dict[str, typing.Any], timestamp: bool = False
     if not os.path.exists(dir):
         os.makedirs(dir)
     with open(filepath, "w", encoding='utf-8') as file:
-        json.dump(export, file, indent=4, sort_keys=True)
+        json.dump(export, file, indent=4)
 
 def apply_dict(config: ConfigRoot[ComponentValue], values: dict[str, typing.Any]) -> None:
     def find_value_dropdown(value: typing.Any, choices: typing.Any) -> bool:
@@ -556,3 +600,30 @@ def apply_dict(config: ConfigRoot[ComponentValue], values: dict[str, typing.Any]
 def import_json(filepath: str) -> dict[str, typing.Any]:
     with open(filepath, "r", encoding='utf-8') as file:
         return json.load(file)
+
+def get_queue_header(config: ConfigRoot[ComponentConfig]) -> list[str]:
+    # 先頭はキュー名(現在はsave_lora_nameと同じ)
+    result: list[str] = ["name"]
+    # 1st pass
+    for component in config.components():
+        result.append(component.config.NAME)
+    # 2nd pass
+    for component in config.second_pass.components():
+        result.append(f"2nd pass:{component.config.NAME}")
+    return result
+
+def list_queues(config: ConfigRoot[ComponentConfig], queue_list: dict[str, dict]) -> list[list[str]]:
+    # 項目名を作成する
+    first_keys = [component.config.NAME for component in config.components()]
+    second_keys = [component.config.NAME for component in config.second_pass.components()]
+
+    lists: list[list[str]] = []
+    for name, item in queue_list.items():
+        # 先頭はキュー名
+        values = [name]
+        # 1st pass
+        values += [item.get(key, "") for key in first_keys]
+        # 2nd pass
+        values += [item.get(key, "") for key in second_keys]
+        lists.append(values)
+    return lists

@@ -39,7 +39,7 @@ stoptimer = 0
 
 CUDA = torch.device("cuda:0")
 
-queue_list: dict[str, dict] = []
+queue_list: dict[str, dict] = {}
 current_name = None
 
 def queue(config: cfg.ConfigRoot[cfg.ComponentValue],
@@ -56,16 +56,15 @@ def queue(config: cfg.ConfigRoot[cfg.ComponentValue],
         dic_config["negative_prompt"] = negative_prompt
         dic_config["original_image"] = original_image
         dic_config["target_image"] = target_image
-        queue_list.append(dic_config)
+        queue_list[key] = dic_config
         return "Added to Queue"
 
-def get_del_queue_list(del_name: str | None = None) -> list[dict]:
+def get_del_queue_list(del_name: str | None = None) ->  dict[str, dict]:
     global queue_list
 
     if not del_name is None:
         del queue_list[del_name]
-
-    return queue_list.values()
+    return queue_list
 
 def train(config: cfg.ConfigRoot[cfg.ComponentValue],
           negative_prompt: str,
