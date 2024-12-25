@@ -1,16 +1,18 @@
+!!! NOW, UNDER DEVELOPMENT. NOT FULLY WORKING !!!
+
 # TrainTrain
-- This is an extension for [AUTOMATIC1111's stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui).
+- This is an extension for [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
 - You can create LoRA, iLECO, and differential LoRA.
 
 [<img src="https://img.shields.io/badge/lang-Egnlish-red.svg?style=plastic" height="25" />](#overview)
 [<img src="https://img.shields.io/badge/言語-日本語-green.svg?style=plastic" height="25" />](README_ja.md)
-[<img src="https://img.shields.io/badge/Support-%E2%99%A5-magenta.svg?logo=github&style=plastic" height="25" />](https://github.com/sponsors/hako-mikan)
 
 # Overview
-This is a tool for training LoRA for Stable Diffusion. It operates as an extension of the Stable Diffusion Web-UI and does not require setting up a training environment. It accelerates the training of regular LoRA, iLECO (instant-LECO), which speeds up the learning of LECO (removing or emphasizing a model's concept), and differential learning that creates slider LoRA from two differential images.
+This is a tool for training LoRA for Stable Diffusion. It operates as an extension of the ComfyUI and does not require setting up a training environment. It accelerates the training of regular LoRA, iLECO (instant-LECO), which speeds up the learning of LECO (removing or emphasizing a model's concept), and differential learning that creates slider LoRA from two differential images.
 
 # Table of Contents
-- [Requirements](#requirements)
+- [Testing](#testing)
+- [NOTICE](#notice)
 - [Installation](#installation)
 - [Usage](#usage)
     - [LoRA](#lora)
@@ -23,11 +25,17 @@ This is a tool for training LoRA for Stable Diffusion. It operates as an extensi
 - [Plot](#plot)
 - [Acknowledgments & References](#acknowledgments)
 
-## Requirements
-   Operates with Web-UI 1.7.
+## Testing
+- Fedora release 41(on Microsoft Windows 11 WSL2)
+- Python 3.12.8
+- ComfyUI 0.3.7
+
+## NOTICE
+In NVIDIA Geforce environments, add `--disable-cuda-malloc` to the ComfyUI startup options.
+ComfyUI's default `backend:cudaMallocAsync` will cause an Out of Memory error if more than the actual VRAM is used, which can lead to training failures.
 
 ## Installation
-   Enter `https://github.com/hako-mikan/sd-webui-traintrain` in the Web-UI's Install From URL and press the Install button, then restart. The first startup may take a little time (a few seconds to tens of seconds).
+   Enter `https://github.com/love2hina-net/comfyui-traintrain.git` in the Web-UI's Install From URL and press the Install button, then restart. The first startup may take a little time (a few seconds to tens of seconds).
 
 ## Usage
    Enter the mandatory parameters for each mode and press the Start Training button to begin training. The created LoRA will be saved in the LoRA folder.

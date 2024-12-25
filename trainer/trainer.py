@@ -90,17 +90,17 @@ class Trainer():
                 return
 
         for component in target_values.components(cfg.ComponentValue):
-            key = component.key
+            key = component.config.NAME
             value = component.value
 
             if (pas > 0) and (not component.config.ENABLE[3]):
                 # 2nd pass時に無効な設定は1st passの値を使う
                 value = cfg.get_value(root, key)
 
-            if not isinstance(value, component.config.TYPE):
+            if not isinstance(value, component.config.VALUE_TYPE):
                 try:
                     # 型が異なる場合、キャストを試みる
-                    value = component.config.TYPE(value)
+                    value = component.config.VALUE_TYPE(value)
                 except:
                     # 失敗した場合、デフォルト値を使う
                     value = component.config.DEFAULT

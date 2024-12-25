@@ -110,7 +110,7 @@ def _train_main(config: cfg.ConfigRoot[cfg.ComponentValue],
 
     t.vae_scale_factor = 0.13025 if t.isxl else 0.18215
 
-    t.model_version = config.model_type.value.value
+    t.model_version = config.model_type.value
 
     if t.mode != ML:
         t.orig_cond, t.orig_vector  = text2cond(t, t.prompts[0])

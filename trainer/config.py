@@ -447,9 +447,9 @@ def _input_convert(config: ConfigRoot[ComponentConfig],
         pass
     elif isinstance(inputs, Block):
         append_args = args[inputs]
-    elif isinstance(inputs, dict):
+    elif isinstance(inputs, set):
         append_args = {}
-        for component in inputs.keys():
+        for component in inputs:
             if not isinstance(component, Block):
                 raise TypeError(f"Input type {type(component)} was illegal type")
             append_args[component] = args[component]

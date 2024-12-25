@@ -1,16 +1,18 @@
+!!! 現在開発中のため、完全には動作しません !!!
+
 # TrainTrain
-- [AUTOMATIC1111's stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui)用の拡張です
+- [ComfyUI](https://github.com/comfyanonymous/ComfyUI)用の拡張です
 - LoRA、iLECO及び差分LoRAを作成できます
 
 [<img src="https://img.shields.io/badge/lang-Egnlish-red.svg?style=plastic" height="25" />](README.md)
 [<img src="https://img.shields.io/badge/言語-日本語-green.svg?style=plastic" height="25" />](#overview)
-[<img src="https://img.shields.io/badge/Support-%E2%99%A5-magenta.svg?logo=github&style=plastic" height="25" />](https://github.com/sponsors/hako-mikan)
 
 # Overview
-Stable DiffusionのLoRAを学習するツールです。Stable Diffusion Web-UIの拡張として動作し、学習用の環境構築を必要としません。通常のLoRA及び、モデルの概念を除去・強調するLECOの学習を高速化したiLECO(instant-LECO)と、ふたつの差分画像からスライダーLoRAなどを作成する差分学習を行えます。
+Stable DiffusionのLoRAを学習するツールです。ComfyUIの拡張として動作し、学習用の環境構築を必要としません。通常のLoRA及び、モデルの概念を除去・強調するLECOの学習を高速化したiLECO(instant-LECO)と、ふたつの差分画像からスライダーLoRAなどを作成する差分学習を行えます。
 
 ## もくじ
-- [使用要件](#使用要件)
+- [確認環境](#確認環境)
+- [注意](#注意)
 - [インストール](#インストール)
 - [使い方](#使い方)
     - [LoRA](#lora)
@@ -23,11 +25,17 @@ Stable DiffusionのLoRAを学習するツールです。Stable Diffusion Web-UI�
 - [Plot](#plot)
 - [謝辞・参考文献](#謝辞)
 
-## 使用要件
-　Web-UI 1.7で動作します。
+## 確認環境
+- Fedora release 41(Microsoft Windows 11 WSL2 上)
+- Python 3.12.8
+- ComfyUI 0.3.7
+
+## 注意
+NVIDIA Geforce系環境ではComyUIの起動オプションに`--disable-cuda-malloc`を付与してください。
+ComfyUIのデフォルト、`backend:cudaMallocAsync`では実VRAM以上の利用をOut of Memoryとしてエラーにしてしまい、学習に失敗しやすいです。
 
 ## インストール
-　Web-UIのInstall From URLに`https://github.com/hako-mikan/sd-webui-traintrain`と入力しInstallボタンを押します。少し(数秒～数十秒)時間が掛かります。
+　Web-UIのInstall From URLに`https://github.com/love2hina-net/comfyui-traintrain.git`と入力しInstallボタンを押します。少し(数秒～数十秒)時間が掛かります。
 
 ## 使い方
 　モードごとの必須パラメーターを入力しStart Trainingボタンを押すと学習が始まります。作成されたLoRAはLoRA用のフォルダに保存されます。モデルとVAEを選択しない場合、現在ロードされているモデルとVAEが使われます。
