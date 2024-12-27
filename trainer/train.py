@@ -19,6 +19,7 @@ from accelerate.utils import set_seed
 from diffusers.models import AutoencoderKL
 from transformers.optimization import AdafactorSchedule
 
+from comfy import model_management
 from .lora import LoRANetwork, LycorisNetwork
 from . import trainer, dataset
 from . import config as cfg
@@ -71,6 +72,8 @@ def train(config: cfg.ConfigRoot[cfg.ComponentValue],
           original_image: Any,
           target_image: Any) -> str:
     global current_name
+
+    model_management.unload_all_models()
 
     # BUG: キューの実行中に防ぐ目的なら、ここで設定するのは不適切
     current_name = config.save_lora_name.value

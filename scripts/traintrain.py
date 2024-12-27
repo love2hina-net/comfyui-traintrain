@@ -141,7 +141,7 @@ def on_ui_tabs():
     CONFIG_ROOT = cfg.ConfigRoot(cfg.ComponentConfig)
     cfg.create(CONFIG_ROOT)
 
-    with gr.Blocks() as ui:
+    with gr.Blocks(css_paths=f"{comfyui.BASEDIR}/css/comfyui-traintrain.css") as ui:
         with gr.Tab("Train"):
             with gr.Row():
                 with gr.Column():
@@ -182,6 +182,8 @@ def on_ui_tabs():
                         # 初期表示項目の設定
                         checkpoints = comfyui.list_checkpoints()
                         default_checkpoint = None if len(checkpoints) <= 0 else checkpoints[0]
+                        model.choices = checkpoints
+                        model.value = default_checkpoint
                         ui.load(lambda: gr.update(choices=checkpoints, value=default_checkpoint), outputs=[model])
                 with gr.Column():
                     with gr.Row(equal_height=True):
@@ -189,6 +191,8 @@ def on_ui_tabs():
                         model_type.render()
 
                         # 初期表示項目の設定
+                        model_type.choices = MODEL_TYPES
+                        model_type.value = MODEL_TYPES[0][1]
                         ui.load(lambda: gr.update(choices=MODEL_TYPES, value=MODEL_TYPES[0][1]), outputs=[model_type])
                 with gr.Column():
                     with gr.Row(equal_height=True):
@@ -198,6 +202,8 @@ def on_ui_tabs():
 
                         # 初期表示項目の設定
                         vaes = ["None"] + comfyui.list_vaes()
+                        vae.choices = vaes
+                        vae.value = vaes[0]
                         ui.load(lambda: gr.update(choices=vaes, value=vaes[0]), outputs=[vae])
 
             gr.HTML(value="Required Parameters(+prompt in iLECO, +images in Difference)")
