@@ -2,7 +2,7 @@ import json
 import os
 import warnings
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Sequence, Any
 from diffusers import StableDiffusionPipeline, DDPMScheduler, StableDiffusionXLPipeline
 import os
 import torch
@@ -12,8 +12,8 @@ import torch.nn as nn
 from pprint import pprint
 from accelerate import Accelerator
 import gradio as gr
-from modules.scripts import basedir
-from modules import shared
+from ..scripts.comfyui import basedir, get_lora_dir
+from . import config as cfg
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -35,25 +35,27 @@ from diffusers import (
     AutoencoderKL,
 )
 
-all_configs = []
-
 PASS2 = "2nd pass"
 
-path_root = basedir()
-jsonspath = os.path.join(path_root,"jsons")
-logspath = os.path.join(path_root,"logs")
-presetspath = os.path.join(path_root,"presets")
+PATH_ROOT = basedir()
+JSONSPATH = os.path.join(PATH_ROOT, "jsons")
+LOGSPATH = os.path.join(PATH_ROOT, "logs")
+PRESETSPATH = os.path.join(PATH_ROOT, "presets")
 
 class Trainer():
-    def __init__(self, jsononly, model, vae, mode, values):
-        self.values = values
-        self.mode = mode
+    def __init__(self,
+                 root: cfg.ConfigRoot[cfg.ComponentValue],
+                 negative_prompt: str,
+                 original_image: Any,
+                 target_image: Any
+                 ) -> None:
+        self.mode = root.mode.value
         self.use_8bit = False
         self.count_dict = {}
         self.metadata = {}
 
-        self.save_dir = shared.cmd_opts.lora_dir
-        self.setpass(0)
+        self.save_dir = get_lora_dir()
+        self.setpass(root, 0)
 
         self.image_size = [int(x) for x in self.image_size.split(",")]
         if len(self.image_size) == 1:
@@ -71,81 +73,75 @@ class Trainer():
 
         self.checkfile()
 
-        clen = len(all_configs) * (len(values) // len(all_configs))
+        self.prompts = (root.original_prompt.value, root.target_prompt.value, negative_prompt)
 
-        self.prompts = values[clen:clen + 3]
+        self.images  = (original_image, target_image)
 
-        self.images =  values[clen + 3:]
-        
-        self.add_dcit = {"mode": mode, "model": model, "vae": vae, "original prompt": self.prompts[0],"target prompt": self.prompts[1]}
+        self.export_json(root)
 
-        self.export_json(jsononly)
-
-    def setpass(self, pas, set = True):
-        values_0 = self.values[:len(all_configs)]
-        values_1 = self.values[len(all_configs):len(all_configs) * 2]
+    # TODO: 2passで呼ばれることが無くなった…
+    def setpass(self, root: cfg.ConfigRoot[cfg.ComponentValue], pas: int, set = True) -> None:
+        target_values: cfg.ConfigBase[cfg.ComponentValue] = root
         if pas == 1:
-            if values_1[-1]:
+            if root.use_2nd_pass_settings.value:
+                target_values = root.second_pass
                 if set: print("Use 2nd pass settings")
             else:
                 return
-        jdict = {}
-        for i, (sets, value) in enumerate(zip(all_configs, values_1 if pas > 0 else values_0)):
-            jdict[sets[0]] = value
-    
-            if pas > 0:
-                if not sets[5][3]:
-                    value = values_0[i]
 
-            if not isinstance(value, sets[4]):
+        for component in target_values.components(cfg.ComponentValue):
+            key = component.config.NAME
+            value = component.value
+
+            if (pas > 0) and (not component.config.ENABLE[3]):
+                # 2nd pass時に無効な設定は1st passの値を使う
+                value = cfg.get_value(root, key)
+
+            if not isinstance(value, component.config.VALUE_TYPE):
                 try:
-                    value = sets[4](value)
+                    # 型が異なる場合、キャストを試みる
+                    value = component.config.VALUE_TYPE(value)
                 except:
-                    value = sets[3]
-            if "precision" in sets[0]:
-                if sets[0] == "train_model_precision" and value == "fp8":
-                    self.use_8bit == True
+                    # 失敗した場合、デフォルト値を使う
+                    value = component.config.DEFAULT
+
+            if "precision" in key:
+                # 精度設定の場合、値を解釈する
+                if (key == "train_model_precision") and (value == "fp8"):
+                    self.use_8bit = True
                     print("Use 8bit Model Precision")
                 value = parse_precision(value)
 
-            if "diff_load_1st_pass" == sets[0]:
+            if "diff_load_1st_pass" == key:
+                # 差分モデルの読み込みファイル名の場合、ファイルを探す
                 found = False
-                value = value if ".safetensors" in value else value + ".safetensors"
-                for root, dirs, files in os.walk(self.save_dir):
+                value = value if value.endswith(".safetensors") else value + ".safetensors"
+                for root, _, files in os.walk(self.save_dir):
                     if value in files:
                         value = os.path.join(root, value)
                         found = True
                 if not found:
                     value = ""
 
-            if set: 
-                setattr(self, sets[0].split("(")[0], value)
-        return jdict
+            if set:
+                setattr(self, key.split("(")[0], value)
 
     savedata = ["model", "vae", ]
     
-    def export_json(self, jsononly):
+    def export_json(self, config: dict):
         current_time = datetime.now()
-        outdict = self.setpass(0, set = False)
-        if self.mode == "Difference":
-            outdict[PASS2] = self.setpass(1, set = False)
-        outdict.update(self.add_dcit)
         today = current_time.strftime("%Y%m%d")
         time = current_time.strftime("%Y%m%d_%H%M%S")
-        add = "" if jsononly else f"-{time}"
-        jsonpath = os.path.join(presetspath, self.save_lora_name + add + ".json")  if jsononly else os.path.join(jsonspath, today, self.save_lora_name + add + ".json")
-        self.csvpath = os.path.join(logspath ,today, self.save_lora_name + add + ".csv")
+        add = f"-{time}"
+        jsonpath = os.path.join(JSONSPATH, today, self.save_lora_name + add + ".json")
+        self.csvpath = os.path.join(LOGSPATH, today, self.save_lora_name + add + ".csv")
         
         if self.save_as_json:
             directory = os.path.dirname(jsonpath)
             if not os.path.exists(directory):
                 os.makedirs(directory)
             with open(jsonpath, 'w') as file:
-                json.dump(outdict, file, indent=4)
-        
-        if jsononly:
-            with open(presetspath, 'w') as file:
-                json.dump(outdict, file, indent=4)  
+                json.dump(config, file, indent=4)
 
     def db(self, *obj, pp = False):
         if self.logging_verbose:
@@ -172,53 +168,53 @@ class Trainer():
                 self.count_dict[tag] = 1
 
 
-def import_json(name, preset = False):
-    def find_files(file_name):
-        for root, dirs, files in os.walk(jsonspath):
-            if file_name in files:
-                return os.path.join(root, file_name)
-        return None
-    if preset:
-        filepath = os.path.join(presetspath, name + ".json")
-    else:
-        filepath = find_files(name if ".json" in name else name + ".json")
+# def import_json(name: str, preset = False):
+#     def find_files(file_name):
+#         for root, _, files in os.walk(jsonspath):
+#             if file_name in files:
+#                 return os.path.join(root, file_name)
+#         return None
+#     if preset:
+#         filepath = os.path.join(presetspath, name + ".json")
+#     else:
+#         filepath = find_files(name if name.endswith(".json") else name + ".json")
 
-    output = []
+#     output = []
 
-    if filepath is None:
-        return [gr.update()] * len(all_configs)
-    with open(filepath, 'r', encoding='utf-8') as file:
-        data = json.load(file)
+#     if filepath is None:
+#         return [gr.update()] * len(all_configs)
+#     with open(filepath, 'r', encoding='utf-8') as file:
+#         data = json.load(file)
     
-    def setconfigs(data, output):
-        for key, gtype ,_ ,default , dtype, _ in all_configs:
-            if key in data:
-                if key == PASS2: continue
-                if gtype == "DD" or "learning rate" in key:
-                    dtype = str
-                try:
-                    output.append(dtype(data[key]))
-                except:
-                    output.append(default)
-            else:
-                output.append(default)
-    setconfigs(data, output)
+#     def setconfigs(data, output):
+#         for key, gtype ,_ ,default , dtype, _ in all_configs:
+#             if key in data:
+#                 if key == PASS2: continue
+#                 if gtype == "DD" or "learning rate" in key:
+#                     dtype = str
+#                 try:
+#                     output.append(dtype(data[key]))
+#                 except:
+#                     output.append(default)
+#             else:
+#                 output.append(default)
+#     setconfigs(data, output)
 
-    if PASS2 in data and data[PASS2]:
-        setconfigs(data[PASS2], output)
-    else:
-        output = output * 2
+#     if PASS2 in data and data[PASS2]:
+#         setconfigs(data[PASS2], output)
+#     else:
+#         output = output * 2
 
-    output.append(data["original prompt"] if "original prompt" in data else "")
-    output.append(data["target prompt"] if "target prompt" in data else "")
-    output.append("")
+#     output.append(data["original prompt"] if "original prompt" in data else "")
+#     output.append(data["target prompt"] if "target prompt" in data else "")
+#     output.append("")
     
-    head = []
-    head.append(data["mode"] if "mode" in data else "LoRA")
-    head.append(data["model"] if "model" in data else None)
-    head.append(data["vae"] if "vae" in data else None)
+#     head = []
+#     head.append(data["mode"] if "mode" in data else "LoRA")
+#     head.append(data["model"] if "model" in data else None)
+#     head.append(data["vae"] if "vae" in data else None)
 
-    return head + output
+#     return head + output
 
 AVAILABLE_SCHEDULERS = Literal["ddim", "ddpm", "lms", "euler_a"]
 

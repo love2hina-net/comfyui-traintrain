@@ -1,33 +1,38 @@
-import launch
-import os
-import subprocess
+import pip
+from pip._internal.metadata import get_default_environment
 
 requirements = [
+"gradio",
+"accelerate",
 "diffusers",
 "safetensors",
 "dadaptation",
 "prodigyopt",
 "wandb",
 "lycoris_lora",
+"lion_pytorch",
 "pandas",
-"matplotlib"
+"matplotlib",
+"bitsandbytes"
 ]
 
-for module in requirements:
-    if not launch.is_installed(module):
-        launch.run_pip(f"install {module}", module)
+#     if os.name == 'nt':
+#         package_url = "bitsandbytes>=0.43.0"
+#         package_name = "bitsandbytes>=0.43.0" 
+#     else:
+#         package_url = "bitsandbytes"
+#         package_name = "bitsandbytes"
 
-try:
-    from ldm_patched.modules import model_management
-except:
-    if os.name == 'nt':
-        package_url = "bitsandbytes>=0.43.0"
-        package_name = "bitsandbytes>=0.43.0" 
-    else:
-        package_url = "bitsandbytes"
-        package_name = "bitsandbytes"
+def list_required_packages(request):
+    installed = [ i.canonical_name for i in get_default_environment().iter_installed_distributions() ]
+    # request と installed に含まれない配列の作成
+    require = [r for r in request if r not in installed]
 
-    if not launch.is_installed(package_name):
-        launch.run_pip(f"install { 'git+' + package_url if 'http' in package_url else package_url}", package_name)
-    else:
-        print(f"{package_name} is already installed.")
+    return require
+
+install_packages = list_required_packages(requirements)
+for i in install_packages:
+    print(f"""Package: {i} is not installed.""")
+
+if (install_packages):
+    pip.main(['install'] + install_packages)

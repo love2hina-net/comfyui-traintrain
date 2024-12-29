@@ -2,160 +2,127 @@ import os
 import csv
 import random
 import time
-import numpy
 import gc
 import json
+import logging
+from typing import Any
+from enum import StrEnum
+
+import numpy
 from PIL import Image
 import traceback
 import torch
 from tqdm import tqdm
-from modules import sd_models, sd_vae, shared, prompt_parser, scripts, lowvram
-from trainer.lora import LoRANetwork, LycorisNetwork
-from trainer import trainer, dataset
+import folder_paths
 from diffusers.optimization import get_scheduler
-from pprint import pprint
 from accelerate.utils import set_seed
 from diffusers.models import AutoencoderKL
 from transformers.optimization import AdafactorSchedule
-import networks
 
+from comfy import model_management
+from .lora import LoRANetwork, LycorisNetwork
+from . import trainer, dataset
+from . import config as cfg
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 MAX_DENOISING_STEPS = 1000
 ML = "LoRA"
 MD = "Difference"
 
-try:
-    from modules.sd_models import forge_model_reload, model_data, FakeInitialModel
-    from modules_forge.main_entry import forge_unet_storage_dtype_options
-    from backend.memory_management import free_memory
-    forge = True
-except:
-    forge = False
-
-jsonspath = trainer.jsonspath
-logspath = trainer.logspath
-presetspath = trainer.presetspath
+class ModelType(StrEnum):
+    SDv1 = "sd_v1"
+    SDv2 = "sd_v2"
+    SDXL = "sdxl_base_v1-0"
 
 stoptimer = 0
 
 CUDA = torch.device("cuda:0")
 
-queue_list = []
+queue_list: dict[str, dict] = {}
 current_name = None
 
-#dfalse, mode, model, vae, *train_settings_1, *train_settings_2, *prompts, *in_images
-
-def get_name_index(wanted):
-    for i, name in enumerate(trainer.all_configs):
-        if name[0] == wanted:
-            return i
-
-def queue(*args):
+def queue(config: cfg.ConfigRoot[cfg.ComponentValue],
+          negative_prompt: str,
+          original_image: Any,
+          target_image: Any) -> str:
     global queue_list
-    name_index = get_name_index("save_lora_name") + 4
-    dup = args[name_index] == current_name
-    for queue in queue_list:
-        if queue[name_index] == args[name_index]:
-            dup = True
-    if dup:
-        return ("Duplicated LoRA name! Could not add to queue.")
 
-    queue_list.append(args)
-    return "Added to Queue"
+    key = config.save_lora_name.value
+    if (key == current_name) or (key in queue_list):
+        return "Duplicated LoRA name! Could not add to queue."
+    else:
+        dic_config = cfg.as_dict(config)
+        dic_config["negative_prompt"] = negative_prompt
+        dic_config["original_image"] = original_image
+        dic_config["target_image"] = target_image
+        queue_list[key] = dic_config
+        return "Added to Queue"
 
-def get_del_queue_list(del_name = None):
+def get_del_queue_list(del_name: str | None = None) ->  dict[str, dict]:
     global queue_list
-    name_index = get_name_index("save_lora_name")
-    out = []
-    del_index = None
 
-    for i, q in enumerate(queue_list):
-        data = [*q[1:-2]]
-        name = data[name_index + 3]
-        data = [name] + data
-        if del_name and name == del_name:
-            del_index = i
-        else:
-            out.append(data)
-    if del_index:
-        del queue_list[del_index]
-    return out
+    if not del_name is None:
+        del queue_list[del_name]
+    return queue_list
 
-def setcurrentname(args):
-    name_index = get_name_index("save_lora_name") + 4
+def train(config: cfg.ConfigRoot[cfg.ComponentValue],
+          negative_prompt: str,
+          original_image: Any,
+          target_image: Any) -> str:
     global current_name
-    current_name = args[name_index]
 
-def train(*args):
-    if not args[0]:
-        setcurrentname(args)
-    result = train_main(*args)
+    model_management.unload_all_models()
+
+    # BUG: キューの実行中に防ぐ目的なら、ここで設定するのは不適切
+    current_name = config.save_lora_name.value
+    result = _train_main(config, negative_prompt, original_image, target_image)
+
+    # キューの処理
     while len(queue_list) > 0:
-        settings = queue_list.pop(0)
-        result +="\n" + train_main(*settings)
+        _, dic_value = queue_list.popitem()
+        # コピーし、復元
+        queue_config = config.copy(cfg.ComponentValue)
+        cfg.apply_dict(queue_config, dic_value)
+        # 実行
+        result +="\n" + _train_main(queue_config, dic_value["negative_prompt"], dic_value["original_image"], dic_value["target_image"])
+
     return result
 
-def train_main(jsononly, mode, modelname, vaename, *args):
-    t = trainer.Trainer(jsononly, modelname, vaename, mode, args)
-
-    if jsononly:
-        return "Preset saved"
+def _train_main(config: cfg.ConfigRoot[cfg.ComponentValue],
+                negative_prompt: str,
+                original_image: Any,
+                target_image: Any) -> str:
+    t = trainer.Trainer(config, negative_prompt, original_image, target_image)
 
     if t.isfile:
         return "File exist!"
 
-    print(" Start Training!")
+    logger.info("[TrainTrain] Start Training!")
 
-    currentinfo = shared.sd_model.sd_checkpoint_info if hasattr(shared.sd_model, "sd_checkpoint_info") else None
+    checkpoint_filename = folder_paths.get_full_path("checkpoints", config.model.value)
+    if not os.path.exists(checkpoint_filename):
+        return f"Error: Checkpoint {checkpoint_filename} not found!"
 
-    checkpoint_info = sd_models.get_closet_checkpoint_match(modelname)
+    vae = None
 
-    lowvram.module_in_gpu = None #web-uiのバグ対策
-    
-    if forge:
-        unet_storage_dtype, _ = forge_unet_storage_dtype_options.get(shared.opts.forge_unet_storage_dtype, (None, False))
-        forge_model_params = dict(
-            checkpoint_info=checkpoint_info,
-            additional_modules=shared.opts.forge_additional_modules,
-            unet_storage_dtype=unet_storage_dtype
-        )
-        model_data.forge_loading_parameters = forge_model_params
-        forge_model_reload()
-        print(dir(shared.sd_model.forge_objects.vae.first_stage_model))
-        vae = shared.sd_model.forge_objects.vae.first_stage_model
-    else:
-        sd_models.load_model(checkpoint_info)
-        vae = None
-
-    t.isxl = shared.sd_model.is_sdxl
-    t.isv2 = shared.sd_model.is_sd2
+    # TODO: 本来はLoad前にStableDiffusionバージョンを確認
+    t.isxl = (config.model_type.value == ModelType.SDXL)
+    t.isv2 = (config.model_type.value == ModelType.SDv2)
 
     t.vae_scale_factor = 0.13025 if t.isxl else 0.18215
 
-    model_ver = "sdxl_base_v1-0" if t.isxl else None
-    model_ver = "sd_v2" if t.isv2 else model_ver
-    t.model_version = "sd_v1" if model_ver is None else model_ver
-
-    checkpoint_filename = shared.sd_model.sd_checkpoint_info.filename
+    t.model_version = config.model_type.value
 
     if t.mode != ML:
         t.orig_cond, t.orig_vector  = text2cond(t, t.prompts[0])
         t.targ_cond, t.targ_vector  = text2cond(t, t.prompts[1])
         t.un_cond, t.un_vector = text2cond(t, t.prompts[2])
 
-    print("Preparing the Model...")
+    logger.info("[TrainTrain] Preparing the Model...")
 
-    if forge:
-        sd_models.model_data.sd_model = None
-        sd_models.model_data.loaded_sd_models = []
-        free_memory(0,CUDA, free_all = True)
-        gc.collect()
-    else:
-        sd_models.unload_model_weights()
-
-    lowvram.module_in_gpu = None #web-uiのバグ対策
-
-    vae_path = sd_vae.vae_dict.get(vaename, None)
+    vae_path = folder_paths.get_full_path("vae", config.vae.value)
     if not vae:
         vae = AutoencoderKL.from_single_file(vae_path) if vae_path is not None else None
 
@@ -167,9 +134,9 @@ def train_main(jsononly, mode, modelname, vaename, *args):
     unet.to(CUDA, dtype=t.train_model_precision)
     try:
         unet.enable_xformers_memory_efficient_attention()
-        print("Enabling Xformers")
+        logger.info("[TrainTrain] Enabling Xformers")
     except:
-        print("Failed to enable Xformers")
+        logger.info("[TrainTrain] Disabled Xformers")
 
     unet.requires_grad_(False)
     unet.eval()
@@ -218,27 +185,14 @@ def train_main(jsononly, mode, modelname, vaename, *args):
         else:
             result = "Test mode"
 
-        print("Done.")
+        logger.info("[TrainTrain] Done.")
 
     except Exception as e:
-        print(traceback.format_exc())
+        logger.error(f"[TrainTrain] Error: Failed Training: {config.save_lora_name.value}", exc_info=True)
         result =  f"Error: {e}"
 
     del t
     flush()
-
-    try:
-        if forge:
-            forge_model_params["checkpoint_info"] = currentinfo if currentinfo else checkpoint_info
-            model_data.forge_loading_parameters = forge_model_params
-            model_data.forge_hash = None
-            forge_model_reload()
-        else:
-            sd_models.load_model(currentinfo)
-    except:
-        lowvram.module_in_gpu = None #web-uiのバグ対策
-
-    if not forge: sd_models.model_data.loaded_sd_models = [] #web-uiのバグ対策
 
     return result
 
@@ -491,7 +445,7 @@ def create_network(t):
     return network, optimizer, lr_scheduler
 
 def load_network(t):
-    types = trainer.all_configs[get_name_index("network_type")][2]
+    types = cfg.NETWORK_TYPES
     if t.network_type in types[:2]:
         return LoRANetwork(t).to(CUDA, dtype=t.train_lora_precision)
     else:

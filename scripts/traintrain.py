@@ -1,215 +1,177 @@
-from cProfile import label
 import os
-from functools import wraps
+import logging
+import random
+from typing import Iterable, Any
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import gradio as gr
-from PIL import Image, ImageChops
-import random
-import numpy as np
-from modules import scripts, script_callbacks, sd_models, sd_vae
-from modules.shared import opts
-from modules.ui import create_output_panel, create_refresh_button
-from trainer import train, trainer, gen
-from packaging import version
+from gradio.blocks import Block
+from PIL import Image
 
-jsonspath = trainer.jsonspath
-logspath = trainer.logspath
-presetspath = trainer.presetspath
+from . import comfyui
+from .comfyui import ToolButton, create_refresh_button
+from ..trainer import config as cfg, train, trainer
+from ..trainer.config import ControlConfig
 
-MODES = ["LoRA", "iLECO", "Difference"]
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
-BLOCKID26=["BASE","IN00","IN01","IN02","IN03","IN04","IN05","IN06","IN07","IN08","IN09","IN10","IN11","M00","OUT00","OUT01","OUT02","OUT03","OUT04","OUT05","OUT06","OUT07","OUT08","OUT09","OUT10","OUT11"]
-BLOCKID17=["BASE","IN01","IN02","IN04","IN05","IN07","IN08","M00","OUT03","OUT04","OUT05","OUT06","OUT07","OUT08","OUT09","OUT10","OUT11"]
-BLOCKID12=["BASE","IN04","IN05","IN07","IN08","M00","OUT00","OUT01","OUT02","OUT03","OUT04","OUT05"]
-BLOCKID20=["BASE","IN00","IN01","IN02","IN03","IN04","IN05","IN06","IN07","IN08","M00","OUT00","OUT01","OUT02","OUT03","OUT04","OUT05","OUT06","OUT07","OUT08"]
+jsonspath = trainer.JSONSPATH
+logspath = trainer.LOGSPATH
 
-PRECISION_TYPES = ["fp32", "bf16", "fp16", "float32", "bfloat16", "float16"]
-NETWORK_TYPES = ["lierla", "c3lier","loha"]
-NETWORK_DIMS = [str(2**x) for x in range(10)]
-NETWORK_ELEMENTS = ["Full", "CrossAttention", "SelfAttention"]
-IMAGESTEPS = [str(x*64) for x in range(10)]
-OPTIMIZERS = ["adamw", "adamw8bit","adafactor","lion", "prodigy", "dadaptadam","dadaptlion","adam8bit","adam",]
-LOSS_REDUCTIONS = ["none", "mean"]
+MODEL_TYPES = [
+    ("StableDiffusion v1", train.ModelType.SDv1),
+    ("StableDiffusion v2", train.ModelType.SDv2),
+    ("StableDiffusion XL", train.ModelType.SDXL)
+]
 
-SCHEDULERS = ["linear", "cosine", "cosine_with_restarts" ,"polynomial", "constant", "constant_with_warmup" ,"piecewise_constant"]
-#NOISE_SCHEDULERS = ["Euler A", "DDIM", "DDPM", "LMSD"]
-NOISE_SCHEDULERS = ["DDIM", "DDPM", "PNDM", "LMS", "Euler", "Euler a", "DPMSolver", "DPMsingle", "Heun", "DPM 2", "DPM 2 a"]
-TARGET_MODULES = ["Both", "U-Net", "Text Encoder"]
+R_COLUMN1 = (
+    ControlConfig.NETWORK_TYPE,
+    ControlConfig.NETWORK_RANK,
+    ControlConfig.NETWORK_ALPHA,
+    ControlConfig.LORA_DATA_DIRECTORY,
+    ControlConfig.LORA_TRIGGER_WORD)
+R_COLUMN2 = (
+    ControlConfig.IMAGE_SIZE,
+    ControlConfig.TRAIN_ITERATIONS,
+    ControlConfig.TRAIN_BATCH_SIZE,
+    ControlConfig.TRAIN_LEARNING_RATE)
+R_COLUMN3 = (
+    ControlConfig.TRAIN_OPTIMIZER,
+    ControlConfig.TRAIN_LR_SCHEDULER,
+    ControlConfig.SAVE_LORA_NAME,
+    ControlConfig.USE_GRADIENT_CHECKPOINTING)
+ROW1 = (ControlConfig.NETWORK_BLOCKS,)
 
-ALL = [True,True,True,True]
-LORA = [True,False,False,False]
-ILECO = [False,True,False,False]
-NDIFF =  [True,True,False,False]
-DIFF = [False,False,True,True]
-DIFF1 = [False,False,True,False]
-DIFF2 = [False,False,False,True]
-NDIFF2 = [True,True,True,False]
-
-#requiered parameters
-use_2nd_pass_settings = ["use_2nd_pass_settings", "CH", None, False, bool, DIFF2]
-lora_data_directory = ["lora_data_directory","TX",None,"", str, LORA]
-lora_trigger_word = ["lora_trigger_word","TX",None,"", str, LORA]
-network_type = ["network_type","DD",NETWORK_TYPES,NETWORK_TYPES[0],str,ALL]
-network_rank = ["network_rank","DD",NETWORK_DIMS[2:],"16",int,ALL]
-network_alpha = ["network_alpha","DD",NETWORK_DIMS,"8",int,ALL]
-network_element = ["network_element","DD",NETWORK_ELEMENTS,None,str,ALL]
-image_size = ["image_size(height, width)", "TX",None,512,str,NDIFF]
-train_iterations = ["train_iterations","TX",None,1000,int,ALL]
-train_batch_size = ["train_batch_size", "TX",None,2,int,ALL]
-train_learning_rate = ["train_learning_rate","TX",None,"1e-4",float,ALL]
-train_optimizer =["train_optimizer","DD",OPTIMIZERS,"adamw",str,ALL]
-train_lr_scheduler =["train_lr_scheduler","DD",SCHEDULERS, "cosine",str,ALL]
-save_lora_name =  ["save_lora_name", "TX",None,"",str,NDIFF2]
-use_gradient_checkpointing = ["use_gradient_checkpointing","CH",None,False,bool,ALL]
-
-#option parameters
-network_conv_rank = ["network_conv_rank","DD",["0"] + NETWORK_DIMS[2:],"0",int,ALL]
-network_conv_alpha = ["network_conv_alpha","DD",["0"] + NETWORK_DIMS,"0",int,ALL]
-train_seed = ["train_seed", "TX",None,-1,int, ALL]
-train_textencoder_learning_rate = ["train_textencoder_learning_rate","TX",None,"",float,LORA]
-train_model_precision = ["train_model_precision","DD",PRECISION_TYPES[:3],"fp16",str,ALL]
-train_lora_precision = ["train_lora_precision","DD",PRECISION_TYPES[:3],"fp32",str,ALL]
-image_buckets_step = ["image_buckets_step", "DD",IMAGESTEPS,"256",int,LORA]
-image_min_length = ["image_min_length", "TX",None,512,int,LORA]
-image_max_ratio = ["image_max_ratio", "TX",None,2,float,LORA]
-sub_image_num = ["sub_image_num", "TX",None,0,int,LORA]
-image_mirroring =  ["image_mirroring", "CH",None,False,bool,LORA]
-image_use_filename_as_tag =  ["image_use_filename_as_tag", "CH",None,False,bool,LORA]
-image_disable_upscale = ["image_disable_upscale", "CH",None,False,bool,LORA]
-save_per_steps = ["save_per_steps", "TX",None,0,int,ALL]
-save_precision = ["save_precision","DD",PRECISION_TYPES[:3],"fp16",str,ALL]
-save_overwrite = ["save_overwrite", "CH",None,False,bool,ALL]
-save_as_json = ["save_as_json", "CH",None,False,bool,NDIFF2]
-
-diff_save_1st_pass = ["diff_save_1st_pass", "CH",None,False,bool,DIFF1]
-diff_1st_pass_only = ["diff_1st_pass_only", "CH",None,False,bool,DIFF1]
-diff_load_1st_pass = ["diff_load_1st_pass","TX", None, "", str, DIFF1]
-train_lr_step_rules = ["train_lr_step_rules","TX",None,"",str,ALL]
-train_lr_warmup_steps = ["train_lr_warmup_steps","TX",None,0,int,ALL]
-train_lr_scheduler_num_cycles = ["train_lr_scheduler_num_cycles","TX",None,1,int,ALL]
-train_lr_scheduler_power = ["train_lr_scheduler_power","TX",None, 1.0, float,ALL]
-train_snr_gamma = ["train_snr_gamma","TX",None,5,float,ALL]
-train_fixed_timsteps_in_batch = ["train_fixed_timsteps_in_batch","CH",None,False,bool,ALL]
-image_use_transparent_background_ajust = ["image_use_transparent_background_ajust","CH",None,False,bool,ALL]
-
-logging_verbose = ["logging_verbose","CH",None,False,bool,NDIFF2]
-logging_save_csv = ["logging_save_csv","CH",False,"",bool,NDIFF2]
-model_v_pred = ["model_v_pred", "CH",None,False,bool,ALL]
-
-network_blocks = ["network_blocks(BASE = TextEncoder)","CB",BLOCKID26,BLOCKID26,list,ALL]
-
-#unuased parameters
-logging_use_wandb = ["logging_use_wandb","CH",None,False,bool]
-train_repeat = ["train_repeat","TX",None, 1.0, int,ALL]
-train_use_bucket = ["train_use_bucket", "CH",None,False,bool]
-train_optimizer_args = ["train_optimizer_args","TX",None,"",str]
-logging_dir = ["logging_dir","TX",None,"",str,NDIFF2]
-gradient_accumulation_steps = ["gradient_accumulation_steps","TX",None,"1",str,ALL]
-gen_noise_scheduler = ["gen_noise_scheduler", "DD",NOISE_SCHEDULERS,NOISE_SCHEDULERS[6],str,NDIFF2]
-lora_train_targets = ["lora_train_targets","RD",TARGET_MODULES,TARGET_MODULES[0], str, LORA]
-logging_use_tensorboard = ["logging_use_tensorboard","CH",False,"",bool,NDIFF2]
-train_min_timesteps = ["train_min_timesteps", "TX",None,0,int,ALL]
-train_max_timesteps = ["train_max_timesteps", "TX",None,1000,int,ALL]
-
-r_column1 = [network_type,network_rank,network_alpha,lora_data_directory,lora_trigger_word]
-r_column2 = [image_size ,train_iterations,train_batch_size ,train_learning_rate]
-r_column3 = [train_optimizer,train_lr_scheduler, save_lora_name,use_gradient_checkpointing]
-row1 = [network_blocks]
-
-o_column1 = [network_conv_rank,network_conv_alpha,network_element,image_buckets_step,
-                     image_min_length,image_max_ratio,sub_image_num,image_mirroring,
-                     image_use_filename_as_tag,image_disable_upscale,image_use_transparent_background_ajust,train_fixed_timsteps_in_batch]
-o_column2 = [train_textencoder_learning_rate,train_seed,train_lr_step_rules, train_lr_warmup_steps, train_lr_scheduler_num_cycles,train_lr_scheduler_power, 
-                     train_snr_gamma, save_per_steps]
-o_column3 = [train_model_precision, train_lora_precision,save_precision,diff_load_1st_pass, diff_save_1st_pass,diff_1st_pass_only,
-                    logging_save_csv,logging_verbose,save_overwrite, save_as_json,model_v_pred]
-
-trainer.all_configs = r_column1 + r_column2 + r_column3 + row1 + o_column1 + o_column2 + o_column3 + [use_2nd_pass_settings]
-
-def makeui(sets, pas = 0):
-    output = []
-    add_id = "2_" if pas > 0 else "1_"
-    for name, uitype, choices, value, _, visible in sets:
-        visible = visible[pas]
-        with gr.Row():
-            if uitype == "DD":
-                output.append(gr.Dropdown(label=name.replace("_"," "), choices=choices, value=value if value else choices[0] , elem_id="tt_" + name, visible = visible))
-            if uitype == "TX":
-                output.append(gr.Textbox(label=name.replace("_"," "),value = value, elem_id="tt_" +add_id + name, visible = visible))
-            if uitype == "CH":
-                output.append(gr.Checkbox(label=name.replace("_"," "),value = value, elem_id="tt_" + name, visible = visible))
-            if uitype == "CB":
-                output.append(gr.CheckboxGroup(label=name.replace("_"," "),choices=choices, value = value, elem_id="tt_" + name, type="value", visible = visible))
-            if uitype == "RD":
-                output.append(gr.Radio(label=name.replace("_"," "),choices=[x + " " for x in choices] if pas > 0 else choices, value = value, elem_id="tt_" + name,visible = visible))
-    return output
-
-txt2img_gen_button = None
-img2img_gen_button = None
-paramsnames = []
-txt2img_params = []
-img2img_params = []
-
-button_o_gen = None
-button_t_gen = None
-button_b_gen = None
-
-prompts = None
-imagegal_orig = None
-imagegal_targ = None
-
-IS_GRADIO_4 = version.parse(gr.__version__) >= version.parse("4.0.0")
-
-class FormComponent:
-    webui_do_not_create_gradio_pyi_thank_you = True
-
-    def get_expected_parent(self):
-        return gr.components.Form
-
-class ToolButton(gr.Button, FormComponent):
-    """Small button with single emoji as text, fits inside gradio forms"""
-
-    @wraps(gr.Button.__init__)
-    def __init__(self, value="", *args, elem_classes=None, **kwargs):
-        elem_classes = elem_classes or []
-        super().__init__(*args, elem_classes=["tool", *elem_classes], value=value, **kwargs)
-
-    def get_block_name(self):
-        return "button"
-
-if IS_GRADIO_4:
-    ToolButton.__module__ = "modules.ui_components"
+O_COLUMN1 = (
+    ControlConfig.NETWORK_CONV_RANK,
+    ControlConfig.NETWORK_CONV_ALPHA,
+    ControlConfig.NETWORK_ELEMENT,
+    ControlConfig.IMAGE_BUCKETS_STEP,
+    ControlConfig.IMAGE_MIN_LENGTH,
+    ControlConfig.IMAGE_MAX_RATIO,
+    ControlConfig.SUB_IMAGE_NUM,
+    ControlConfig.IMAGE_MIRRORING,
+    ControlConfig.IMAGE_USE_FILENAME_AS_TAG,
+    ControlConfig.IMAGE_DISABLE_UPSCALE,
+    ControlConfig.IMAGE_USE_TRANSPARENT_BACKGROUND_AJUST,
+    ControlConfig.TRAIN_FIXED_TIMSTEPS_IN_BATCH)
+O_COLUMN2 = (
+    ControlConfig.TRAIN_TEXTENCODER_LEARNING_RATE,
+    ControlConfig.TRAIN_SEED,
+    ControlConfig.TRAIN_LR_STEP_RULES,
+    ControlConfig.TRAIN_LR_WARMUP_STEPS,
+    ControlConfig.TRAIN_LR_SCHEDULER_NUM_CYCLES,
+    ControlConfig.TRAIN_LR_SCHEDULER_POWER, 
+    ControlConfig.TRAIN_SNR_GAMMA,
+    ControlConfig.SAVE_PER_STEPS)
+O_COLUMN3 = (
+    ControlConfig.TRAIN_MODEL_PRECISION,
+    ControlConfig.TRAIN_LORA_PRECISION,
+    ControlConfig.SAVE_PRECISION,
+    ControlConfig.DIFF_LOAD_1ST_PASS,
+    ControlConfig.DIFF_SAVE_1ST_PASS,
+    ControlConfig.DIFF_1ST_PASS_ONLY,
+    ControlConfig.LOGGING_SAVE_CSV,
+    ControlConfig.LOGGING_VERBOSE,
+    ControlConfig.SAVE_OVERWRITE,
+    ControlConfig.SAVE_AS_JSON,
+    ControlConfig.MODEL_V_PRED)
 
 def on_ui_tabs():
-    global imagegal_orig, imagegal_targ, prompts, result
-    global button_o_gen, button_t_gen, button_b_gen
+    def mapping_ui(config: cfg.ConfigBase[cfg.ComponentConfig], sets: Iterable[ControlConfig]) -> dict:
+        output = {}
+        for i in sets:
+            component = cfg.get_instance(config, i)
+            output[component.elem_id] = component
+            with gr.Row():
+                component.render()
 
-    def load_preset(name):
-        json_files = [f.replace(".json","") for f in os.listdir(presetspath) if f.endswith('.json')]
-        if name is None:
-            return json_files
+        return output
+
+    def list_presets() -> list[str]:
+        json_files: list[str] = []
+        with os.scandir(trainer.PRESETSPATH) as it:
+            for entry in it:
+                if entry.is_file() and entry.name.endswith('.json'):
+                    json_files.append(entry.name.removesuffix(".json"))
+
+        return json_files
+    
+    def load_preset(config: cfg.ConfigRoot[cfg.ComponentValue], components: dict) -> None:
+        json_select = components[presets]
+        filepath = os.path.join(trainer.PRESETSPATH, f"{json_select}.json")
+        if os.path.exists(filepath):
+            cfg.apply_dict(config, cfg.import_json(filepath))
         else:
-            return trainer.import_json(name, preset = True)
+            logger.error(f"[TrainTrain] Loading preset was failed, because file not found: {filepath}")
+
+    def save_preset(config: cfg.ConfigRoot[cfg.ComponentValue], components: dict) -> dict[Block, Any]:
+        cfg.export_json(trainer.PRESETSPATH, cfg.as_dict(config), False)
+        return { presets: gr.update(choices=list_presets()) }
+
+    def plot_csv(csv_path: str) -> plt.Figure | None:
+        if csv_path is None:
+            return None
+        elif not os.path.exists(csv_path):
+            logger.error(f"[TrainTrain] CSV file not found: {csv_path}")
+            return None
+
+        df = pd.read_csv(csv_path)
+        x = df.columns[0]
+
+        fig, ax1 = plt.subplots(figsize=(10, 6))
+
+        # 主要な y 軸 (2 列目)
+        color = 'tab:red'
+        ax1.set_xlabel(x)
+        ax1.set_ylabel(df.columns[1], color=color)
+        ax1.plot(df[x], df[df.columns[1]], color=color)
+        ax1.tick_params(axis='y', labelcolor=color)
+
+        # 追加の y 軸 (3 列目以降)
+        ax2 = ax1.twinx()
+        color = 'tab:blue'
+        ax2.set_ylabel('Learning Rates', color=color)  # 他の列のラベル
+        for column in df.columns[2:]:
+            ax2.plot(df[x], df[column], label=column)
+        ax2.tick_params(axis='y', labelcolor=color)
+
+        plt.title("Training Result")
+        fig.tight_layout()
+        plt.legend()
+        plt.grid(True)
+
+        return plt.gcf()
 
     folder_symbol = '\U0001f4c2'   
     load_symbol = '\u2199\ufe0f'   # ↙
     save_symbol = '\U0001f4be'     # 💾
     refresh_symbol = '\U0001f504'  # 🔄
 
-    with gr.Blocks() as ui:
+    CONFIG_ROOT = cfg.ConfigRoot(cfg.ComponentConfig)
+    cfg.create(CONFIG_ROOT)
+
+    with gr.Blocks(css_paths=f"{comfyui.BASEDIR}/css/comfyui-traintrain.css") as ui:
         with gr.Tab("Train"):
-            result = gr.Textbox(label="Message")
             with gr.Row():
-                start= gr.Button(value="Start Training",elem_classes=["compact_button"],variant='primary')
-                stop= gr.Button(value="Stop",elem_classes=["compact_button"],variant='primary')
-                stop_save= gr.Button(value="Stop and Save",elem_classes=["compact_button"],variant='primary')
+                with gr.Column():
+                    start= gr.Button(value="Start Training",elem_classes=["compact_button"],variant='primary')
+                with gr.Column():
+                    stop= gr.Button(value="Stop",elem_classes=["compact_button"],variant='primary')
             with gr.Row():
                 with gr.Column():
                     queue = gr.Button(value="Add to Queue", elem_classes=["compact_button"],variant='primary')
                 with gr.Column():
+                    stop_save= gr.Button(value="Stop and Save",elem_classes=["compact_button"],variant='primary')
+
+            result = gr.Textbox(label="Message")
+
+            with gr.Row():
+                with gr.Column():
                     with gr.Row():
-                        presets = gr.Dropdown(choices=load_preset(None), show_label=False, elem_id="tt_preset")
+                        presets = gr.Dropdown(choices=list_presets(), show_label=False, elem_id="tt_preset", interactive=True)
                         loadpreset = ToolButton(value=load_symbol)
                         savepreset = ToolButton(value=save_symbol)
                         refleshpreset = ToolButton(value=refresh_symbol)
@@ -218,87 +180,92 @@ def on_ui_tabs():
                         sets_file = gr.Textbox(show_label=False)
                         openfolder = ToolButton(value=folder_symbol)
                         loadjson = ToolButton(value=load_symbol)
-            with gr.Row(equal_height=True):
+            with gr.Row():
                 with gr.Column():
-                    mode = gr.Radio(label="Mode", choices= MODES, value = "LoRA")
-                with gr.Column():
-                    with gr.Row(equal_height=True):
-                        model = gr.Dropdown(sd_models.checkpoint_tiles(),elem_id="model_converter_model_name",label="Model",interactive=True)
-                        create_refresh_button(model, sd_models.list_models,lambda: {"choices": sd_models.checkpoint_tiles()},"refresh_checkpoint_Z")
+                    mode = CONFIG_ROOT.mode.instance
+                    mode.render()
+            with gr.Row():
                 with gr.Column():
                     with gr.Row(equal_height=True):
-                        vae = gr.Dropdown(choices=["None"] + list(sd_vae.vae_dict), value="None", label="VAE", elem_id="modelmerger_bake_in_vae")
-                        create_refresh_button(vae, sd_vae.refresh_vae_list, lambda: {"choices": ["None"] + list(sd_vae.vae_dict)}, "modelmerger_refresh_bake_in_vae")
+                        model = CONFIG_ROOT.model.instance
+                        model.render()
+                        create_refresh_button(model, lambda: { "choices": comfyui.list_checkpoints() })
 
-            dummy = gr.Checkbox(visible=False, value = False)
+                        # 初期表示項目の設定
+                        checkpoints = comfyui.list_checkpoints()
+                        default_checkpoint = None if len(checkpoints) <= 0 else checkpoints[0]
+                        model.choices = checkpoints
+                        model.value = default_checkpoint
+                        ui.load(lambda: gr.update(choices=checkpoints, value=default_checkpoint), outputs=[model])
+                with gr.Column():
+                    with gr.Row(equal_height=True):
+                        model_type = CONFIG_ROOT.model_type.instance
+                        model_type.render()
+
+                        # 初期表示項目の設定
+                        model_type.choices = MODEL_TYPES
+                        model_type.value = MODEL_TYPES[0][1]
+                        ui.load(lambda: gr.update(choices=MODEL_TYPES, value=MODEL_TYPES[0][1]), outputs=[model_type])
+                with gr.Column():
+                    with gr.Row(equal_height=True):
+                        vae = CONFIG_ROOT.vae.instance
+                        vae.render()
+                        create_refresh_button(vae, lambda: { "choices": ["None"] + comfyui.list_vaes() })
+
+                        # 初期表示項目の設定
+                        vaes = ["None"] + comfyui.list_vaes()
+                        vae.choices = vaes
+                        vae.value = vaes[0]
+                        ui.load(lambda: gr.update(choices=vaes, value=vaes[0]), outputs=[vae])
 
             gr.HTML(value="Required Parameters(+prompt in iLECO, +images in Difference)")
             with gr.Row():
                 with gr.Column(variant="compact"):
-                    col1_r1 = makeui(r_column1)
+                    mapping_ui(CONFIG_ROOT, R_COLUMN1)
                 with gr.Column(variant="compact"):
-                    col2_r1 = makeui(r_column2)
+                    mapping_ui(CONFIG_ROOT, R_COLUMN2)
                 with gr.Column(variant="compact"):
-                    col3_r1 = makeui(r_column3)
+                    mapping_ui(CONFIG_ROOT, R_COLUMN3)
             with gr.Row():
-                blocks_grs_1 = makeui(row1)
+                mapping_ui(CONFIG_ROOT, ROW1)
 
             gr.HTML(value="Option Parameters")
             with gr.Row():
                 with gr.Column(variant="compact"):
-                    col1_o1 = makeui(o_column1)
+                    mapping_ui(CONFIG_ROOT, O_COLUMN1)
                 with gr.Column(variant="compact"):
-                    col2_o1 = makeui(o_column2)
+                    mapping_ui(CONFIG_ROOT, O_COLUMN2)
                 with gr.Column(variant="compact"):
-                    col3_o1 = makeui(o_column3)
-
-                train_settings_1 = col1_r1 + col2_r1 + col3_r1 + blocks_grs_1 + col1_o1 + col2_o1 + col3_o1 + [dummy]
+                    mapping_ui(CONFIG_ROOT, O_COLUMN3)
 
             with gr.Accordion("2nd pass", open= False, visible = False) as diff_2nd:
                 with gr.Row():
-                    use_2nd = makeui([use_2nd_pass_settings], 3)
+                    mapping_ui(CONFIG_ROOT, (ControlConfig.USE_2ND_PASS_SETTINGS,))
                     copy = gr.Button(value= "Copy settings from 1st pass")
                 gr.HTML(value="Required Parameters")
                 with gr.Row():  
                     with gr.Column(variant="compact"):
-                        col1_r2 = makeui(r_column1, 3)
+                        mapping_ui(CONFIG_ROOT.second_pass, R_COLUMN1)
                     with gr.Column(variant="compact"):
-                        col2_r2 = makeui(r_column2, 3)
+                        mapping_ui(CONFIG_ROOT.second_pass, R_COLUMN2)
                     with gr.Column(variant="compact"):
-                        col3_r2 = makeui(r_column3, 3)
+                        mapping_ui(CONFIG_ROOT.second_pass, R_COLUMN3)
                 with gr.Row():
-                    blocks_grs_2 = makeui(row1)
+                    mapping_ui(CONFIG_ROOT.second_pass, ROW1)
 
                 gr.HTML(value="Option Parameters")
                 with gr.Row():
                     with gr.Column(variant="compact"):
-                        col1_o2 = makeui(o_column1, 3)
+                        mapping_ui(CONFIG_ROOT.second_pass, O_COLUMN1)
                     with gr.Column(variant="compact"):
-                        col2_o2 = makeui(o_column2, 3)
+                        mapping_ui(CONFIG_ROOT.second_pass, O_COLUMN2)
                     with gr.Column(variant="compact"):
-                        col3_o2= makeui(o_column3, 3)
-
-                        
-                train_settings_2 = col1_r2 + col2_r2 + col3_r2 + blocks_grs_2 + col1_o2 + col2_o2 + col3_o2 + use_2nd
+                        mapping_ui(CONFIG_ROOT.second_pass, O_COLUMN3)
 
             with gr.Group(visible=False) as g_leco:
-                with gr.Row():
-                    orig_prompt = gr.TextArea(label="Original Prompt",lines=3)
-                with gr.Row():
-                    targ_prompt = gr.TextArea(label="Target Prompt",lines=3)
+                prompts = mapping_ui(CONFIG_ROOT, (ControlConfig.ORIGINAL_PROMPT, ControlConfig.TARGET_PROMPT))
                 with gr.Row():
                     neg_prompt = gr.TextArea(label="Negative Prompt(not userd in training)",lines=3)
-                with gr.Row():
-                    button_o_gen = gr.Button(value="Generate Original",elem_classes=["compact_button"],variant='primary')
-                    button_t_gen = gr.Button(value="Generate Target",elem_classes=["compact_button"],variant='primary')
-                    button_b_gen = gr.Button(value="Generate All",elem_classes=["compact_button"],variant='primary')
-                with gr.Row():
-                    with gr.Column():
-                        o_g =  create_output_panel("txt2img", opts.outdir_txt2img_samples)
-                        imagegal_orig = [x for x in o_g] if isinstance(o_g, tuple) else [o_g.gallery, o_g.generation_info, o_g.infotext, o_g.html_log]
-                    with gr.Column():
-                        t_g =  create_output_panel("txt2img", opts.outdir_txt2img_samples)
-                        imagegal_targ = [x for x in t_g] if isinstance(t_g, tuple) else [t_g.gallery, t_g.generation_info, t_g.infotext, t_g.html_log]
 
             with gr.Group(visible=False) as g_diff:
                 with gr.Row():
@@ -313,12 +280,17 @@ def on_ui_tabs():
                 delete_queue= gr.Button(value="Delete Queue",elem_classes=["compact_button"],variant='primary')
                 delete_name= gr.Textbox(label="Name of Queue to delete")
             with gr.Row():
-                queue_list = gr.DataFrame(headers=["Name", "Mode", "Model", "VAE"] + [x[0] for x in trainer.all_configs] * 2 + ["Original prompt", "Target prompt"] )
+                queue_list = gr.DataFrame(headers=cfg.get_queue_header(CONFIG_ROOT))
 
         with gr.Tab("Plot"):
             with gr.Row():
-                reload_plot= gr.Button(value="Reloat Plot",elem_classes=["compact_button"],variant='primary')
-                plot_file = gr.Textbox(label="Name of logfile, blank for last or current training")
+                logs = gr.FileExplorer(root_dir=trainer.LOGSPATH,
+                                       glob="*.csv",
+                                       file_count="single",
+                                       interactive=True)
+            with gr.Row():
+                reload_plot = gr.Button(value="Reload Plot", elem_classes=["compact_button"], variant='primary')
+                create_refresh_button(logs, lambda: { "ignore_glob": "*.dummy" if logs.ignore_glob == "" else "" })
             with gr.Row():
                 plot = gr.Plot()
 
@@ -352,107 +324,54 @@ def on_ui_tabs():
         dtrue = gr.Checkbox(value = True, visible= False)
         dfalse = gr.Checkbox(value = False, visible= False)
 
-        prompts = [orig_prompt, targ_prompt, neg_prompt]
-        in_images = [orig_image, targ_image]
-
-        def savepreset_f(*args):
-            train.train(*args)
-            return gr.update(choices=load_preset(None))
+        # prompts |= { f"{neg_prompt.elem_id}": neg_prompt }
+        # in_images = { orig_image, targ_image }
 
         angle_bg.click(change_angle_bg,[dtrue, image_dir, save_dir, input_image,output_name, num_of_images ,change_angle,max_tilting_angle, change_scale, min_scale, fix_side], [image_result])
         angle_bg_i.click(change_angle_bg,[dfalse, image_dir, save_dir, input_image,output_name, num_of_images ,change_angle,max_tilting_angle, change_scale, min_scale, fix_side], [image_result])
 
-        start.click(train.train, [dfalse, mode, model, vae, *train_settings_1, *train_settings_2, *prompts, *in_images],[result])
-        queue.click(train.queue, [dfalse, mode, model, vae, *train_settings_1, *train_settings_2, *prompts, *in_images],[result])
-        savepreset.click(savepreset_f, [dtrue, mode, model, vae, *train_settings_1, *train_settings_2, *prompts, *in_images], [presets])
-        refleshpreset.click(lambda : gr.update(choices=load_preset(None)), outputs = [presets])
+        cfg.event_proxy(CONFIG_ROOT, start.click,
+                        lambda config, appends: train.train(config, *appends),
+                        [neg_prompt, orig_image, targ_image], result)
+        cfg.event_proxy(CONFIG_ROOT, queue.click,
+                        lambda config, appends: train.queue(config, *appends),
+                        [neg_prompt, orig_image, targ_image], result)
+        cfg.event_proxy(CONFIG_ROOT, savepreset.click, save_preset, None, { presets })
+        refleshpreset.click(lambda : gr.update(choices=list_presets()), outputs = presets)
 
-        reload_queue.click(train.get_del_queue_list, outputs= queue_list)
-        delete_queue.click(train.get_del_queue_list, inputs = [delete_name], outputs= queue_list)
+        reload_queue.click(lambda: cfg.list_queues(CONFIG_ROOT, train.get_del_queue_list()), outputs=queue_list)
+        delete_queue.click(lambda name: cfg.list_queues(CONFIG_ROOT ,train.get_del_queue_list(name)), inputs=[delete_name], outputs=queue_list)
 
         stop.click(train.stop_time,[dfalse],[result])
         stop_save.click(train.stop_time,[dtrue],[result])
 
-        def change_the_mode(mode):
-            mode = MODES.index(mode)
-            out = [x[5][mode] for x in trainer.all_configs]
-            if mode == 1: #LECO
-                out.extend([False, True, False])
-            elif mode > 1: #Difference
-                out.extend([True, False, True])
-            else:
-                out.extend([False, False, False])
-            return [gr.update(visible = x) for x in out]
+        def change_the_mode(config: cfg.ConfigRoot[cfg.ComponentValue], components: dict) -> dict[Block, Any]:
+            updates = {}
+            mode = cfg.MODES.index(config.mode.value)
 
-        def change_the_block(type, select):
-            blocks = BLOCKID17 if type == NETWORK_TYPES[0] else BLOCKID26
-            return gr.update(choices = blocks, value = [x for x in select if x in blocks])
+            # 通常コントロール分
+            for component in config.components(cfg.ComponentValue):
+                component.update = gr.update(visible=component.config.ENABLE[mode])
+            # diff_2nd
+            updates[diff_2nd] = gr.update(visible=((False, False, True)[mode]))
+            # g_leco
+            updates[g_leco] = gr.update(visible=((False, True, False)[mode]))
+            # g_diff
+            updates[g_diff] = gr.update(visible=((False, False, True)[mode]))
+            return updates
 
         def openfolder_f():
             os.startfile(jsonspath)
 
-        loadjson.click(trainer.import_json,[sets_file], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
-        loadpreset.click(load_preset,[presets], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
-        mode.change(change_the_mode,[mode],[*train_settings_1, diff_2nd, g_leco ,g_diff])
+        # loadjson.click(trainer.import_json,[sets_file], [mode, model, vae] +  train_settings_1 +  train_settings_2 + prompts[:2])
+        cfg.event_proxy(CONFIG_ROOT, loadpreset.click, load_preset, { presets }, None)
+        cfg.event_proxy(CONFIG_ROOT, mode.change, change_the_mode, None, { diff_2nd, g_leco, g_diff })
         openfolder.click(openfolder_f)
-        copy.click(lambda *x: x, train_settings_1[1:], train_settings_2[1:])
+        # copy.click(lambda *x: x, train_settings_1[1:], train_settings_2[1:])
 
-        reload_plot.click(plot_csv, [plot_file],[plot])
+        reload_plot.click(plot_csv, [logs], [plot])
 
-    return (ui, "TrainTrain", "TrainTrain"),
-
-def plot_csv(csv_path):
-    def get_csv(csv_path):
-        csv_path = csv_path if ".csv" in csv_path else csv_path + ".csv"
-        if csv_path:
-            for root, dirs, files in os.walk(logspath):
-                if csv_path in files:
-                    return os.path.join(root, csv_path)
-
-        # 指定されたファイル名が見つからない場合、または csv_path が空の場合
-        # ディレクトリ内で最新の CSV ファイルを探す
-        latest_csv = None
-        latest_time = 0
-
-        for root, dirs, files in os.walk(logspath):
-            for file in files:
-                if file.endswith(".csv"):
-                    file_path = os.path.join(root, file)
-                    file_time = os.path.getmtime(file_path)
-
-                    if file_time > latest_time:
-                        latest_csv = file_path
-                        latest_time = file_time
-
-        return latest_csv
-
-    df = pd.read_csv(get_csv(csv_path))
-    x = df.columns[0]
-
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-
-    # 主要な y 軸 (2 列目)
-    color = 'tab:red'
-    ax1.set_xlabel(x)
-    ax1.set_ylabel(df.columns[1], color=color)
-    ax1.plot(df[x], df[df.columns[1]], color=color)
-    ax1.tick_params(axis='y', labelcolor=color)
-
-    # 追加の y 軸 (3 列目以降)
-    ax2 = ax1.twinx()
-    color = 'tab:blue'
-    ax2.set_ylabel('Learning Rates', color=color)  # 他の列のラベル
-    for column in df.columns[2:]:
-        ax2.plot(df[x], df[column], label=column)
-    ax2.tick_params(axis='y', labelcolor=color)
-
-    plt.title("Training Result")
-    fig.tight_layout()
-    plt.legend()
-    plt.grid(True)
-
-    return plt.gcf()
-
+    return (ui, "TrainTrain", "TrainTrain")
 
 # ここに必要な追加の関数を定義します。
 def downscale_image(image, min_scale, fix_side=None):
@@ -552,110 +471,3 @@ def getjsonlist():
     json_files = [f for f in os.listdir(jsonspath) if f.endswith('.json')]
     json_files = [f.replace(".json", "") for f in json_files]
     return json_files
-
-class GenParamGetter(scripts.Script):
-    events_assigned = False
-    def title(self):
-        return "TrainTrain Generation Parameter Getter"
-    
-    def show(self, is_img2img):
-        return scripts.AlwaysVisible
-
-    def get_wanted_params(params,wanted):
-        output = []
-        for target in wanted:
-            if target is None:
-                output.append(params[0])
-                continue
-            for param in params:
-                if hasattr(param,"label"):
-                    if param.label == target:
-                        output.append(param)
-        return output
-
-    def after_component(self, component: gr.components.Component, **_kwargs):
-        """Find generate button"""
-        if component.elem_id == "txt2img_generate":
-            GenParamGetter.txt2img_gen_button = component
-        elif  component.elem_id == "img2img_generate":
-            GenParamGetter.img2img_gen_button = component
-
-    def get_components_by_ids(root: gr.Blocks, ids: list[int]):
-        components: list[gr.Blocks] = []
-
-        if root._id in ids:
-            components.append(root)
-            ids = [_id for _id in ids if _id != root._id]
-        
-        if hasattr(root,"children"):
-            for block in root.children:
-                components.extend(GenParamGetter.get_components_by_ids(block, ids))
-        return components
-    
-    def compare_components_with_ids(components: list[gr.Blocks], ids: list[int]):
-        return len(components) == len(ids) and all(component._id == _id for component, _id in zip(components, ids))
-
-    def get_params_components(demo: gr.Blocks, app):
-        global paramsnames, txt2img_params, img2img_params
-        for _id, _is_txt2img in zip([GenParamGetter.txt2img_gen_button._id, GenParamGetter.img2img_gen_button._id], [True, False]):
-            if hasattr(demo,"dependencies"):
-                dependencies: list[dict] = [x for x in demo.dependencies if x["trigger"] == "click" and _id in x["targets"]]
-                g4 = False
-            else:
-                dependencies: list[dict] = [x for x in demo.config["dependencies"] if x["targets"][0][1] == "click" and _id in x["targets"][0]]
-                g4 = True
-            
-            dependency: dict = None
-
-            for d in dependencies:
-                if len(d["outputs"]) == 4:
-                    dependency = d
-            
-            if g4:
-                params = [demo.blocks[x] for x in dependency['inputs']]
-                if _is_txt2img:
-                    paramsnames = [x.label if hasattr(x,"label") else "None" for x in params]
-
-                if _is_txt2img:
-                    txt2img_params = params
-                else:
-                    img2img_params = params
-            else:
-                params = [params for params in demo.fns if GenParamGetter.compare_components_with_ids(params.inputs, dependency["inputs"])]
-
-                if _is_txt2img:
-                    paramsnames = [x.label if hasattr(x,"label") else "None" for x in params[0].inputs]
-
-                if _is_txt2img:
-                    txt2img_params = params[0].inputs 
-                else:
-                    img2img_params = params[0].inputs
-
-            # from pprint import pprint
-            # pprint(paramsnames)
-
-        if not GenParamGetter.events_assigned:
-            with demo:
-                button_o_gen.click(
-                    fn=gen.setup_gen_p,
-                    inputs=[gr.Checkbox(value=False, visible=False), prompts[0], prompts[2], *txt2img_params],
-                    outputs=imagegal_orig,
-                )
-
-                button_t_gen.click(
-                    fn=gen.setup_gen_p,
-                    inputs=[gr.Checkbox(value=False, visible=False), prompts[1], prompts[2], *txt2img_params],
-                    outputs=imagegal_targ,
-                )
-
-                button_b_gen.click(
-                    fn=gen.gen_both,
-                    inputs=[*prompts, *txt2img_params],
-                    outputs=imagegal_orig + imagegal_targ
-                )
-
-            GenParamGetter.events_assigned = True
-
-if __package__ == "traintrain":
-    script_callbacks.on_ui_tabs(on_ui_tabs)
-    script_callbacks.on_app_started(GenParamGetter.get_params_components)

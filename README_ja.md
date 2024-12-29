@@ -1,16 +1,19 @@
+!!! 現在開発中のため、完全には動作しません !!!
+
 # TrainTrain
-- [AUTOMATIC1111's stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui)用の拡張です
+- [ComfyUI](https://github.com/comfyanonymous/ComfyUI)用の拡張です
 - LoRA、iLECO及び差分LoRAを作成できます
 
 [<img src="https://img.shields.io/badge/lang-Egnlish-red.svg?style=plastic" height="25" />](README.md)
 [<img src="https://img.shields.io/badge/言語-日本語-green.svg?style=plastic" height="25" />](#overview)
-[<img src="https://img.shields.io/badge/Support-%E2%99%A5-magenta.svg?logo=github&style=plastic" height="25" />](https://github.com/sponsors/hako-mikan)
 
 # Overview
-Stable DiffusionのLoRAを学習するツールです。Stable Diffusion Web-UIの拡張として動作し、学習用の環境構築を必要としません。通常のLoRA及び、モデルの概念を除去・強調するLECOの学習を高速化したiLECO(instant-LECO)と、ふたつの差分画像からスライダーLoRAなどを作成する差分学習を行えます。
+Stable DiffusionのLoRAを学習するツールです。ComfyUIの拡張として動作し、学習用の環境構築を必要としません。通常のLoRA及び、モデルの概念を除去・強調するLECOの学習を高速化したiLECO(instant-LECO)と、ふたつの差分画像からスライダーLoRAなどを作成する差分学習を行えます。
 
 ## もくじ
-- [使用要件](#使用要件)
+- [確認環境](#確認環境)
+- [注意](#注意)
+- [Original (Stable Diffusion WebUI版)との違い](#originalstable-diffusion-webui版との違い)
 - [インストール](#インストール)
 - [使い方](#使い方)
     - [LoRA](#lora)
@@ -23,51 +26,67 @@ Stable DiffusionのLoRAを学習するツールです。Stable Diffusion Web-UI�
 - [Plot](#plot)
 - [謝辞・参考文献](#謝辞)
 
-## 使用要件
-　Web-UI 1.7で動作します。
+## 確認環境
+- Fedora release 41(Microsoft Windows 11 WSL2 上)
+- Python 3.12.8
+- ComfyUI 0.3.7
+
+## 注意
+NVIDIA Geforce系環境ではComyUIの起動オプションに`--disable-cuda-malloc`を付与してください。
+ComfyUIのデフォルト、`backend:cudaMallocAsync`では実VRAM以上の利用をOut of Memoryとしてエラーにしてしまい、学習に失敗しやすいです。
+
+## Original(Stable Diffusion WebUI版)との違い
+### 劣化点
+- チェックポイントに対して Model Type 設定が必要です。
+- 学習中にタスクをキューに追加することができません。
+- iLECOの設定にプロンプトの確認用画像出力機能がありません。
+
+### 改善点
+- Plot 対象ファイルを画面上で選択できるようになりました。
 
 ## インストール
-　Web-UIのInstall From URLに`https://github.com/hako-mikan/sd-webui-traintrain`と入力しInstallボタンを押します。少し(数秒～数十秒)時間が掛かります。
+Web-UIのInstall From URLに`https://github.com/love2hina-net/comfyui-traintrain.git`と入力しInstallボタンを押します。少し(数秒～数十秒)時間が掛かります。
 
 ## 使い方
-　モードごとの必須パラメーターを入力しStart Trainingボタンを押すと学習が始まります。作成されたLoRAはLoRA用のフォルダに保存されます。モデルとVAEを選択しない場合、現在ロードされているモデルとVAEが使われます。
+モードごとの必須パラメーターを入力しStart Trainingボタンを押すと学習が始まります。作成されたLoRAはLoRA用のフォルダに保存されます。
+
 ## LoRA
 画像からLoRAを学習します。
 ### 入力画像
 　`jpg`, `jpeg`, `png`, `gif`, `tif`, `tiff`, `bmp`, `webp`, `pcx`, `ico`形式に対応します。大きさは`image size`で指定した大きさにする必要はありませんが、学習時に切り取られるため切り取られ方によってはキャプションと不整合が生じる場合があるのである程度は整形した方がいいです。画像はアスペクト比ごとに分類されます。例えば`image size`を768,512に設定した場合、768×512のピクセルサイズを最大値としていくつかの解像度のセット（bucket）が作成されます。デフォルトの場合、768×512,512×512,512×768の3種類の分類になり、画像はアスペクト比ごとに近い分類に振り分けられます。これは学習が同一のサイズでないと受け付けないためです。そのさい、画像の縮小と切り取りが行われます。画像の中心を基準点として切り取りが行われます。分類を細分化したい場合には`image buckets step`の値を小さくします。
 
 ### 画像の縮小・ミラーリング
-　同じ画像を何度も学習すると過学習になり、その画像そのものが出てきます。学習画像が少ない場合、過学習に対処するために画像を縮小したり反転させたりして学習画像を増やすことをします。`image size`を`768,512`に`image buckets step`を`128`に設定すると、
+同じ画像を何度も学習すると過学習になり、その画像そのものが出てきます。学習画像が少ない場合、過学習に対処するために画像を縮小したり反転させたりして学習画像を増やすことをします。`image size`を`768,512`に`image buckets step`を`128`に設定すると、
 `(384, 768), (512, 768), (512, 640), (512, 512), (640, 512), (768, 512), (768, 384)`の枠が作られます。さらに、`image min length`を`256`にすると縮小用の枠として`(256, 512), (384, 640), (256, 384), (384, 512), (384, 384), (256, 256), (512, 384), (384, 256), (640, 384), (512, 256)`の枠が作られます。画像はまず普通の枠に振り分けられますが、`sub image num`が設定されている場合、アスペクト比の近い縮小用の枠にも縮小して格納されます。このとき、`(512, 640)`の枠に格納された画像について、`sub image num`が3と設定されている場合は `(384, 640)`、`(256, 384)`、`(384, 512)`にも縮小して格納されます。`image mirroring`を有効にすると左右反転された画像も格納され、結果として1枚の画像から8枚の学習用画像が生成されます。
 
 ### キャプション、トリガーワード
-　画像と同じファイル名の`txt`,`caption`ファイルがある場合、ファイルに書かれたテキストを使って学習を行います。どちらも存在する場合、`txt`ファイルが優先されます。`trigger word`が設定されている場合、すべてのキャプションの前に`trigger word`が挿入されます。キャプションファイルがない場合も同様です。
+画像と同じファイル名の`txt`,`caption`ファイルがある場合、ファイルに書かれたテキストを使って学習を行います。どちらも存在する場合、`txt`ファイルが優先されます。`trigger word`が設定されている場合、すべてのキャプションの前に`trigger word`が挿入されます。キャプションファイルがない場合も同様です。
 
 ### キャプションの考え方
-　Aというキャラクターを学習するとします。Aというキャラクターはツインテールで青いシャツを着て赤いスカートを着用しているとします。Aが描かれた白い背景の絵があるとして、キャプションにはAの名前と、どの方向を向いているか、背景が白いことなどを記入します。ツインテールで青いシャツを着て赤いスカートを着用しているという要素はA特有の要素で学習させたいものなのでキャプションには記入しません。一方、向きや背景、構図などは学習してもらっては困るので記入します。
+Aというキャラクターを学習するとします。Aというキャラクターはツインテールで青いシャツを着て赤いスカートを着用しているとします。Aが描かれた白い背景の絵があるとして、キャプションにはAの名前と、どの方向を向いているか、背景が白いことなどを記入します。ツインテールで青いシャツを着て赤いスカートを着用しているという要素はA特有の要素で学習させたいものなのでキャプションには記入しません。一方、向きや背景、構図などは学習してもらっては困るので記入します。
 
 ## iLECO
-　iLECO(instant-LECO)はLECOの学習過程を高速化したもので、Original Promptで指定した概念をTarget Promptの概念に近づけるような学習を行います。Target Promptに何も入れない場合、その概念を除去するような学習になります。
-　例としてどんなモデルでも強固に出てくるMona Lisaさんを消してみます。Original Promptに「Mona Lisa」、Target Promptは空欄にします。`train iteration` の値が500程度あれば収束します。`alpha`の値は通常rankより小さな値を設定しますが、iLECOの場合はrankより大きな値にした方がいい場合もあります。
- ![](https://github.com/hako-mikan/sd-webui-traintrain/blob/images/sample1.jpg)  
+iLECO(instant-LECO)はLECOの学習過程を高速化したもので、Original Promptで指定した概念をTarget Promptの概念に近づけるような学習を行います。Target Promptに何も入れない場合、その概念を除去するような学習になります。
+例としてどんなモデルでも強固に出てくるMona Lisaさんを消してみます。Original Promptに「Mona Lisa」、Target Promptは空欄にします。`train iteration` の値が500程度あれば収束します。`alpha`の値は通常rankより小さな値を設定しますが、iLECOの場合はrankより大きな値にした方がいい場合もあります。
+![](https://github.com/hako-mikan/sd-webui-traintrain/blob/images/sample1.jpg)  
 Mona Lisaさんを消すことができました。次にTarget Promptに「Vincent van Gogh Sunflowers」と入れてみます。すると、モナリザさんがひまわりになるLoRAができました。
 ![](https://github.com/hako-mikan/sd-webui-traintrain/blob/images/sample2.jpg) 
 Original Promptに「red」、Target Promptに「blue」を入れてみます。赤を青くするLoRAができましたね。
- ![](https://github.com/hako-mikan/sd-webui-traintrain/blob/images/sample3.jpg) 
+![](https://github.com/hako-mikan/sd-webui-traintrain/blob/images/sample3.jpg) 
  
 ## Difference
-　ふたつの差分画像からLoRAを作成します。いわゆるコピー機学習法というものです。いったん同じ画像しか出ないLoRA(コピー機)を作成した後、コピー機をLoRAを適用した状態で差分の学習を行うことで差分相当のLoRAをつくる方法です。Original, Targetに画像を設定してください。画像サイズは同じにしてください。
-　まずコピー機の学習が始まり、その後差分の学習が始まります。例として目を閉じるLoRAを作ってみます。以下のふたつの画像を使います。  
-   <img src="https://github.com/hako-mikan/sd-webui-traintrain/blob/images/sample4.jpg" width="200">
-   <img src="https://github.com/hako-mikan/sd-webui-traintrain/blob/images/sample5.jpg" width="200">  
-　Difference_Use2ndPassSettingsを使います。`train batch size`は1～3を設定します。大きな値を入れてもあまり意味はありません。できました。目を閉じる以外はほとんど画風や構図に影響を与えていません。これは2ndPassでrank(dim)を4と小さくしているためです。これをコピー機と同じ16にしてしまうと、画風や構図に影響を与えてしまいます。
- ![](https://github.com/hako-mikan/sd-webui-traintrain/blob/images/sample6.jpg) 
+ふたつの差分画像からLoRAを作成します。いわゆるコピー機学習法というものです。いったん同じ画像しか出ないLoRA(コピー機)を作成した後、コピー機をLoRAを適用した状態で差分の学習を行うことで差分相当のLoRAをつくる方法です。Original, Targetに画像を設定してください。画像サイズは同じにしてください。
+まずコピー機の学習が始まり、その後差分の学習が始まります。例として目を閉じるLoRAを作ってみます。以下のふたつの画像を使います。  
+<img src="https://github.com/hako-mikan/sd-webui-traintrain/blob/images/sample4.jpg" width="200">
+<img src="https://github.com/hako-mikan/sd-webui-traintrain/blob/images/sample5.jpg" width="200">  
+Difference_Use2ndPassSettingsを使います。`train batch size`は1～3を設定します。大きな値を入れてもあまり意味はありません。できました。目を閉じる以外はほとんど画風や構図に影響を与えていません。これは2ndPassでrank(dim)を4と小さくしているためです。これをコピー機と同じ16にしてしまうと、画風や構図に影響を与えてしまいます。
+![](https://github.com/hako-mikan/sd-webui-traintrain/blob/images/sample6.jpg) 
    
 > [!TIP]
 > VRAMが足りない場合は`gradient checkpointng`を有効化して下さい。計算時間が少し長くなる代わりにVRAM使用量を抑えられます。場合によっては`gradient checkpointng`を有効化してバッチサイズを大きくした方が計算時間が短くなる場合があります。コピー機学習ではバッチサイズを3より大きくしても変化は少ないので3以下の方がいいでしょう。バッチサイズは一度に学習する画像の数ですが、バッチサイズを倍にしたときに`iteration`を半分にできるかというとそう簡単な話ではありません。1ステップの学習で1回のウェイトの更新が行われますが、バッチサイズを倍にしてもこの回数は倍にはなりませんし、倍の効率で学習が行われるわけではないからです。
 
 ## 設定
-## 必須パラメーター
+### 必須パラメーター
 
 |パラメーター| 詳細  | 
 |----|----|
@@ -86,7 +105,7 @@ Original Promptに「red」、Target Promptに「blue」を入れてみます。
 |save lora name |保存時のファイル名です。設定しないとuntitledになります| 
 |use gradient checkpointng |VRAM使用量が抑えられる代わりに少し学習が遅くなる| 
 
-## オプションパラメーター
+### オプションパラメーター
 オプションなので指定しなくても動作します。
 |パラメーター| 詳細  | 
 |----|----|
@@ -119,16 +138,16 @@ Original Promptに「red」、Target Promptに「blue」を入れてみます。
 |logging_save_csv|csv形式でstep,loss,learning rateを記録する|
 
 ## プリセット、設定の保存とロード
-　ボタンで設定を呼び出せます。設定はjsonファイルで扱います。プリセットはpresetフォルダに保存してあります。
+ボタンで設定を呼び出せます。設定はjsonファイルで扱います。プリセットはpresetフォルダに保存してあります。
 
 ## Queue
-　学習を予約できます。`Add to Queue`ボタンを押すと、現在の設定で学習が予約されます。学習中にこのボタンを押すと、学習後に次の学習が自動的に始まります。学習前に押すと`Start Training`を押したときの設定で学習が終わった後、Queueリストの学習が順に処理されます。`save lora name`が同じ設定は追加できません。
+学習を予約できます。`Add to Queue`ボタンを押すと、現在の設定で学習が予約されます。学習前に押すと`Start Training`を押したときの設定で学習が終わった後、Queueリストの学習が順に処理されます。`save lora name`が同じ設定は追加できません。
 
 ## Plot
-    logging_save_csvオプションを有効化したとき、学習の進捗をグラフ化できます。`Name of logfile`に何も入力しない場合、学習中か直近の学習の結果が表示されます。csvファイル名を入力するとその結果が表示されます。フルパスでは無くファイル名のみで大丈夫です。ファイルはlogsフォルダに入っている必要があります。
+logging_save_csvオプションを有効化したとき、学習の進捗をグラフ化できます。`Name of logfile`に何も入力しない場合、学習中か直近の学習の結果が表示されます。csvファイル名を入力するとその結果が表示されます。フルパスでは無くファイル名のみで大丈夫です。ファイルはlogsフォルダに入っている必要があります。
 
 ## 謝辞
-　このコードは[Plat](https://github.com/p1atdev)氏の[LECO](https://github.com/p1atdev/LECO), [laksjdjf](https://github.com/laksjdjf)氏の[学習コード](https://github.com/laksjdjf/sd-trainer), [kohya](https://github.com/kohya-ss)氏の[学習コード](https://github.com/kohya-ss/sd-scripts)、[KohakuBlueleaf](https://github.com/KohakuBlueleaf)氏の[LyCORIS](https://github.com/KohakuBlueleaf/LyCORIS)を参考にしています。
+このコードは[Plat](https://github.com/p1atdev)氏の[LECO](https://github.com/p1atdev/LECO), [laksjdjf](https://github.com/laksjdjf)氏の[学習コード](https://github.com/laksjdjf/sd-trainer), [kohya](https://github.com/kohya-ss)氏の[学習コード](https://github.com/kohya-ss/sd-scripts)、[KohakuBlueleaf](https://github.com/KohakuBlueleaf)氏の[LyCORIS](https://github.com/KohakuBlueleaf/LyCORIS)を参考にしています。
 
 ## Reference
 - https://github.com/rohitgandikota/erasing
