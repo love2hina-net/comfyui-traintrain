@@ -1,6 +1,9 @@
+import typing
 import os.path as path
 from functools import wraps
+
 import gradio as gr
+from gradio.components.base import Component
 
 import folder_paths
 
@@ -37,29 +40,33 @@ class ToolButton(gr.Button, FormComponent):
     def get_block_name(self):
         return "button"
 
-def create_refresh_button(refresh_component, refresh_method, refreshed_args, elem_id) -> ToolButton:
-    refresh_components = refresh_component if isinstance(refresh_component, list) else [refresh_component]
+type RefreshResult = typing.Sequence[dict[str, typing.Any]] | dict[str, typing.Any]
 
-    label = None
-    for comp in refresh_components:
-        label = getattr(comp, 'label', None)
-        if label is not None:
-            break
+def create_refresh_button(components: typing.Sequence[Component] | Component,
+                          callcback: typing.Callable[[], RefreshResult]) -> ToolButton:
+    refresh_components = components if isinstance(components, typing.Sequence) else [components]
 
-    def refresh():
-        refresh_method()
-        args = refreshed_args() if callable(refreshed_args) else refreshed_args
+    def refresh() -> list[dict[str, typing.Any]]:
+        updates: list[dict[str, typing.Any]] = [{} for _ in refresh_components]
 
-        for k, v in args.items():
-            for comp in refresh_components:
-                setattr(comp, k, v)
+        refresh_args = callcback()
+        refresh_args = refresh_args if isinstance(refresh_args, typing.Sequence) else [refresh_args]
 
-        return [gr.update(**(args or {})) for _ in refresh_components] if len(refresh_components) > 1 else gr.update(**(args or {}))
+        if len(refresh_args) == 0:
+            pass
+        elif (len(refresh_components) == 1) and (len(refresh_args) > 1):
+            raise ValueError("Expected single outputs, but got multiple outputs.")
+        else:
+            demultiplexer: bool = (len(refresh_components) == 1)
 
-    refresh_button = ToolButton(value=refresh_symbol, elem_id=elem_id)
-    refresh_button.click(
-        fn=refresh,
-        inputs=[],
-        outputs=refresh_components
-    )
+            for i, comp in enumerate(refresh_components):
+                index = 0 if demultiplexer else i
+                for key, value in refresh_args[index].items():
+                    setattr(comp, key, value)
+                updates[i] = gr.update(**refresh_args[index])
+        
+        return updates[0] if len(updates) == 1 else updates
+
+    refresh_button = ToolButton(value=refresh_symbol)
+    refresh_button.click(fn=refresh, inputs=[], outputs=refresh_components)
     return refresh_button
